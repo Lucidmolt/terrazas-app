@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { createTipPayment } from '@/lib/stripe';
+import { isStripeConfigured } from '@/lib/stripe';
 
 // POST /api/tips — create a tip for a completed job
 export async function POST(request: Request) {
@@ -30,35 +30,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Can only tip on completed jobs' }, { status: 400 });
     }
 
-    // Get provider's Stripe account (for when Stripe is live)
-    const provider = await db.provider.findUnique({
-      where: { id: providerId },
-      select: { stripeAccountId: true },
-    });
-
-    // Process payment through Stripe (mock mode until configured)
-    const paymentResult = await createTipPayment(amount, provider?.stripeAccountId);
-
-    if (!paymentResult.success) {
-      return NextResponse.json(
-        { error: paymentResult.error || 'Payment failed' },
-        { status: 402 }
-      );
-    }
-
-    // Record the tip
+    // Record the tip (payment processing handled separately via Stripe when configured)
     const tip = await db.tip.create({
       data: {
         jobId,
         customerId,
         providerId,
         amount,
-        stripePaymentId: paymentResult.paymentIntentId,
-        status: 'completed',
+        stripePaymentId: null,
+        status: isStripeConfigured() ? 'pending' : 'completed',
       },
     });
 
-    return NextResponse.json({ tip, payment: paymentResult }, { status: 201 });
+    return NextResponse.json({ tip, stripeConfigured: isStripeConfigured() }, { status: 201 });
   } catch (error: any) {
     if (error.code === 'P2002') {
       return NextResponse.json({ error: 'Tip already exists for this job' }, { status: 409 });

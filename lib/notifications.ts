@@ -1,14 +1,12 @@
-// ── Notification Dispatch System ─────────────────────────────────────
-// Handles sending alerts to providers when jobs are broadcasted,
-// and to customers when jobs are claimed/completed.
-//
-// Channels:
-//   1. In-app (always) — stored in Notification table
-//   2. Email (via Supabase/Resend) — for users with email enabled
-//   3. SMS (via Twilio) — future, for providers with phone verified
-//   4. Push (via Web Push) — future, for PWA users
-
 import { db } from '@/lib/db';
+import { Resend } from 'resend';
+
+// ── Email Provider ─────────────────────────────────────────────────
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+
+// From address — uses terrazas.app domain when verified, otherwise Resend default
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Terrazas <onboarding@resend.dev>';
 
 // ── Types ──────────────────────────────────────────────────────────
 type NotificationType =
@@ -40,32 +38,66 @@ async function createNotification(opts: NotifyOptions, channel: string = 'in_app
       title: opts.title,
       body: opts.body,
       metadata: opts.metadata ? JSON.stringify(opts.metadata) : null,
-      isSent: channel === 'in_app', // In-app is instant
+      isSent: channel === 'in_app',
       sentAt: channel === 'in_app' ? new Date() : null,
     },
   });
 }
 
-// ── Send Email Alert ───────────────────────────────────────────────
+// ── Send Email Alert (via Resend) ──────────────────────────────────
 async function sendEmailNotification(
   email: string,
   subject: string,
-  body: string
+  textBody: string
 ): Promise<boolean> {
-  // Use Supabase Edge Function or direct SMTP
-  // For now, log it — will wire to Resend/SendGrid later
-  console.log(`📧 EMAIL → ${email}: ${subject}`);
-  console.log(`   ${body}`);
+  // Build a clean HTML version
+  const htmlBody = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; background: #fafafa;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="font-size: 28px; font-weight: 900; letter-spacing: -1px; color: #166534; margin: 0;">TERRAZAS</h1>
+        <p style="color: #94a3b8; font-size: 11px; margin-top: 4px;">Premium On-Demand Lawn Care</p>
+      </div>
+      <div style="background: white; border-radius: 16px; padding: 24px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+        ${textBody.split('\n').map(line =>
+          line.trim() ? `<p style="color: #334155; font-size: 14px; line-height: 1.6; margin: 8px 0;">${line}</p>` : '<br/>'
+        ).join('')}
+      </div>
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="https://terrazas.app" style="display: inline-block; background: #166534; color: white; text-decoration: none; padding: 12px 32px; border-radius: 24px; font-weight: 700; font-size: 14px;">Open Terrazas</a>
+      </div>
+      <p style="text-align: center; color: #94a3b8; font-size: 10px; margin-top: 24px;">
+        © ${new Date().getFullYear()} Terrazas · Liberal, KS · <a href="https://terrazas.app" style="color: #94a3b8;">terrazas.app</a>
+      </p>
+    </div>
+  `;
 
-  // TODO: Wire to email provider
-  // const res = await fetch('https://api.resend.com/emails', {
-  //   method: 'POST',
-  //   headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ from: 'Terrazas <alerts@terrazas.app>', to: email, subject, text: body }),
-  // });
-  // return res.ok;
+  if (!resend) {
+    // No Resend key — log for development
+    console.log(`📧 EMAIL (mock) → ${email}: ${subject}`);
+    console.log(`   ${textBody.substring(0, 100)}...`);
+    return true;
+  }
 
-  return true; // Mock success for now
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject,
+      text: textBody,
+      html: htmlBody,
+    });
+
+    if (error) {
+      console.error(`📧 EMAIL FAILED → ${email}:`, error);
+      return false;
+    }
+
+    console.log(`📧 EMAIL SENT → ${email}: ${subject}`);
+    return true;
+  } catch (err) {
+    console.error(`📧 EMAIL ERROR → ${email}:`, err);
+    return false;
+  }
 }
 
 // ── Broadcast Job to Providers ─────────────────────────────────────

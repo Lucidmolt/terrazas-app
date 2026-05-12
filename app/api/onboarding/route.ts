@@ -38,7 +38,7 @@ export async function POST(request: Request) {
           userId: user.id,
           businessName,
           serviceTypes: JSON.stringify(selectedServices || []),
-          coverageZips: JSON.stringify(zipCodes || []),
+          zipCodes: JSON.stringify(zipCodes || []),
           isActive: true,
           isVerified: false, // Manual verification required
           rating: 0,
