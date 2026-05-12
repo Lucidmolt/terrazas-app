@@ -288,6 +288,168 @@ function toRad(deg: number): number {
   return deg * (Math.PI / 180);
 }
 
+// ── Business Search (for provider onboarding) ─────────────────────
+// Uses Google Places API (New) v1 endpoints
+const PLACES_V1 = 'https://places.googleapis.com/v1';
+
+export interface BusinessSearchResult {
+  placeId: string;
+  name: string;
+  address: string;
+  rating: number;
+  reviewCount: number;
+  isOpen?: boolean;
+  types: string[];
+  photoName?: string; // For photo URL generation
+}
+
+export async function searchBusiness(
+  query: string,
+  nearZip?: string
+): Promise<BusinessSearchResult[]> {
+  if (!API_KEY || query.length < 2) return [];
+
+  try {
+    // Build location bias from zip code
+    let locationBias: any = undefined;
+    if (nearZip) {
+      const geo = await geocodeAddress(nearZip);
+      if (geo) {
+        locationBias = {
+          circle: {
+            center: { latitude: geo.lat, longitude: geo.lng },
+            radius: 80000, // 80km
+          },
+        };
+      }
+    }
+
+    const body: any = {
+      textQuery: query,
+      maxResultCount: 8,
+    };
+    if (locationBias) body.locationBias = locationBias;
+
+    const res = await fetch(`${PLACES_V1}/places:searchText`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': API_KEY,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.types,places.regularOpeningHours,places.photos',
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+
+    if (!data.places?.length) return [];
+
+    return data.places.map((p: any) => ({
+      placeId: p.id,
+      name: p.displayName?.text || '',
+      address: p.formattedAddress || '',
+      rating: p.rating || 0,
+      reviewCount: p.userRatingCount || 0,
+      isOpen: p.regularOpeningHours?.openNow ?? undefined,
+      types: p.types || [],
+      photoName: p.photos?.[0]?.name || undefined,
+    }));
+  } catch (error) {
+    console.error('[Maps] Business search error:', error);
+    return [];
+  }
+}
+
+// ── Full Business Profile (from Place ID) ──────────────────────────
+// Pulls everything needed for provider onboarding auto-fill
+export interface BusinessProfile {
+  placeId: string;
+  name: string;
+  address: string;
+  phone: string;
+  website: string;
+  rating: number;
+  reviewCount: number;
+  lat: number;
+  lng: number;
+  zipCode: string;
+  city: string;
+  state: string;
+  photoNames: string[]; // Resource names for photo URLs
+  reviews: {
+    author: string;
+    rating: number;
+    text: string;
+    timeAgo: string;
+  }[];
+  hours: string[];
+  isOpen: boolean;
+  types: string[];
+}
+
+export async function getBusinessProfile(placeId: string): Promise<BusinessProfile | null> {
+  if (!API_KEY) return null;
+
+  try {
+    const fieldMask = [
+      'id', 'displayName', 'formattedAddress', 'nationalPhoneNumber',
+      'websiteUri', 'rating', 'userRatingCount', 'location',
+      'addressComponents', 'photos', 'reviews', 'regularOpeningHours', 'types',
+    ].join(',');
+
+    const res = await fetch(`${PLACES_V1}/places/${placeId}`, {
+      headers: {
+        'X-Goog-Api-Key': API_KEY,
+        'X-Goog-FieldMask': fieldMask,
+      },
+    });
+    const r = await res.json();
+
+    if (!r.id) return null;
+
+    const components = r.addressComponents || [];
+    const getComponent = (type: string) =>
+      components.find((c: any) => c.types?.includes(type))?.shortText || '';
+
+    return {
+      placeId: r.id,
+      name: r.displayName?.text || '',
+      address: r.formattedAddress || '',
+      phone: r.nationalPhoneNumber || '',
+      website: r.websiteUri || '',
+      rating: r.rating || 0,
+      reviewCount: r.userRatingCount || 0,
+      lat: r.location?.latitude || 0,
+      lng: r.location?.longitude || 0,
+      zipCode: getComponent('postal_code'),
+      city: getComponent('locality'),
+      state: getComponent('administrative_area_level_1'),
+      photoNames: (r.photos || []).slice(0, 10).map((p: any) => p.name),
+      reviews: (r.reviews || []).slice(0, 5).map((rev: any) => ({
+        author: rev.authorAttribution?.displayName || 'Anonymous',
+        rating: rev.rating || 0,
+        text: rev.text?.text || '',
+        timeAgo: rev.relativePublishTimeDescription || '',
+      })),
+      hours: r.regularOpeningHours?.weekdayDescriptions || [],
+      isOpen: r.regularOpeningHours?.openNow ?? true,
+      types: r.types || [],
+    };
+  } catch (error) {
+    console.error('[Maps] Business profile error:', error);
+    return null;
+  }
+}
+
+// ── Google Place Photo URL ─────────────────────────────────────────
+// Converts a photo reference into a displayable URL
+export function getPlacePhotoUrl(
+  photoReference: string,
+  maxWidth: number = 800
+): string {
+  if (!API_KEY) return '';
+  return `${PLACES_BASE}/photo?maxwidth=${maxWidth}&photo_reference=${photoReference}&key=${API_KEY}`;
+}
+
 // ── Check if API key is configured ─────────────────────────────────
 export function isMapsConfigured(): boolean {
   return !!API_KEY;
