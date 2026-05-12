@@ -99,20 +99,46 @@ model Job {
   latitude         Float?    // Job location lat
   longitude        Float?    // Job location lng
   placeId          String?   // Google Place ID for the address
-  price            Float     @default(45.0)
-  serviceFee       Float     @default(0)    // Platform service fee charged
-  processingFee    Float     @default(2.50) // Processing fee charged
-  customerTotal    Float     @default(0)    // Total charged to customer
-  providerPayout   Float     @default(0)    // Amount provider receives
+
+  // ── Dynamic Pricing Fields ──
+  scope            String    @default("front_back") // front_only | back_only | front_back | full_property
+  lotSize          String    @default("medium")     // small | medium | large | xl
+  urgency          String    @default("same_day")   // scheduled | same_day | asap
+  conditionScore   Float?    // 1-10 from AI vision
+  conditionGrade   String?   // pristine | good | average | overgrown | neglected
+  extras           String    @default("[]") // JSON array of extra keys
+
+  // ── Pricing Breakdown (stored at time of creation) ──
+  basePrice        Float     @default(45.0)
+  scopeMultiplier  Float     @default(1.0)
+  conditionMult    Float     @default(1.0)
+  demandMultiplier Float     @default(1.0)
+  lotSizeMultiplier Float    @default(1.0)
+  urgencyMultiplier Float    @default(1.0)
+  price            Float     @default(45.0)   // Final job price after multipliers
+  serviceFee       Float     @default(0)      // Platform service fee charged
+  processingFee    Float     @default(2.50)   // Processing fee charged
+  extrasTotal      Float     @default(0)      // Total from extras
+  customerTotal    Float     @default(0)      // Total charged to customer
+  providerPayout   Float     @default(0)      // Amount provider receives
   paymentIntentId  String?   // Stripe PaymentIntent ID
-  photoBeforeUrl   String?
-  photoAfterUrl    String?
+
+  // ── Photos (required for job posting) ──
+  photoFrontUrl    String?   // Front yard photo (required)
+  photoBackUrl     String?   // Back yard photo (required if back selected)
+  photoExtraUrl    String?   // Optional third photo
+  photoAfterUrl    String?   // Provider uploads after completion
+
+  // ── AI Vision ──
   conditionNotes   String?   // Yard Vision AI output
   aiWarning        Boolean   @default(false)
   aiProvider       String?   // "local" | "cloud" — which AI assessed it
+
+  // ── Status Tracking ──
   etaMinutes       Int?
   pendingProId     String?
   customerNotes    String?   // Special instructions from customer
+  surgeLevel       String?   // low | normal | busy | high | peak
   broadcastedAt    DateTime? // When the job was sent to providers
   claimedAt        DateTime?
   completedAt      DateTime?

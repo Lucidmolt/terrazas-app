@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { geocodeAddress } from '@/lib/google-maps';
-import { calculatePricing } from '@/lib/constants';
+import { calculateDynamicPrice } from '@/lib/pricing';
 import { broadcastJobToProviders } from '@/lib/notifications';
 
 // GET /api/jobs — list jobs (broadcast for pros, own for customers)
@@ -34,32 +34,41 @@ export async function GET(request: Request) {
   }
 }
 
-// POST /api/jobs — create a new job (broadcast or direct)
+// POST /api/jobs — create a new job with dynamic pricing
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    let { customerId, zipCode, address, latitude, longitude, placeId, serviceType, tier, price, providerId, customerNotes } = body;
+    let {
+      customerId, zipCode, address, latitude, longitude, placeId,
+      serviceType, tier, providerId, customerNotes,
+      // Dynamic pricing inputs
+      scope, lotSize, urgency, conditionScore, extras,
+      // Photos
+      photoFrontUrl, photoBackUrl, photoExtraUrl,
+      // Optional override (admin/testing only)
+      priceOverride,
+    } = body;
 
     if (!zipCode) {
       return NextResponse.json({ error: 'zipCode is required' }, { status: 400 });
     }
 
-    // Demo mode: resolve actual customer ID from DB if placeholder is used
+    // Resolve customer ID
     if (!customerId || customerId.startsWith('demo')) {
       const demoCustomer = await db.user.findFirst({ where: { role: 'customer' } });
       if (!demoCustomer) {
-        return NextResponse.json({ error: 'No customer found in database. Run: npm run db:seed' }, { status: 500 });
+        return NextResponse.json({ error: 'No customer found in database' }, { status: 500 });
       }
       customerId = demoCustomer.id;
     }
 
-    // Demo mode: resolve provider ID if placeholder
+    // Resolve provider ID
     if (providerId && providerId.startsWith('demo')) {
       const demoPro = await db.provider.findFirst({ where: { isActive: true } });
       providerId = demoPro?.id || null;
     }
 
-    // Auto-geocode address if lat/lng not provided
+    // Auto-geocode address
     if (address && (!latitude || !longitude)) {
       const geo = await geocodeAddress(address);
       if (geo) {
@@ -70,9 +79,17 @@ export async function POST(request: Request) {
       }
     }
 
-    // Calculate pricing with platform fees
-    const jobPrice = price || 45;
-    const pricing = calculatePricing(jobPrice);
+    // ── Dynamic Pricing ──
+    const pricing = await calculateDynamicPrice({
+      tier: tier || 'basic',
+      scope: scope || 'front_back',
+      conditionScore: conditionScore || undefined,
+      lotSize: lotSize || 'medium',
+      urgency: urgency || 'same_day',
+      extras: extras || [],
+      zipCode,
+      tipAmount: 0,
+    });
 
     const job = await db.job.create({
       data: {
@@ -84,11 +101,38 @@ export async function POST(request: Request) {
         placeId: placeId || null,
         serviceType: serviceType || 'mowing',
         tier: tier || 'basic',
-        price: jobPrice,
+
+        // Pricing variables
+        scope: scope || 'front_back',
+        lotSize: lotSize || 'medium',
+        urgency: urgency || 'same_day',
+        conditionScore: conditionScore || null,
+        conditionGrade: pricing.conditionGrade,
+        extras: JSON.stringify(extras || []),
+
+        // Stored multipliers (for transparency/audit)
+        basePrice: pricing.basePrice,
+        scopeMultiplier: pricing.scopeMultiplier,
+        conditionMult: pricing.conditionMultiplier,
+        demandMultiplier: pricing.demandMultiplier,
+        lotSizeMultiplier: pricing.lotSizeMultiplier,
+        urgencyMultiplier: pricing.urgencyMultiplier,
+
+        // Final amounts
+        price: priceOverride || pricing.jobPrice,
         serviceFee: pricing.serviceFee,
         processingFee: pricing.processingFee,
+        extrasTotal: pricing.extrasTotal,
         customerTotal: pricing.customerTotal,
         providerPayout: pricing.providerPayout,
+
+        // Photos
+        photoFrontUrl: photoFrontUrl || null,
+        photoBackUrl: photoBackUrl || null,
+        photoExtraUrl: photoExtraUrl || null,
+
+        // Meta
+        surgeLevel: pricing.surgeLevel,
         customerNotes: customerNotes || null,
         providerId: providerId || null,
         status: providerId ? 'pending_claim' : 'broadcast',
@@ -106,11 +150,23 @@ export async function POST(request: Request) {
     return NextResponse.json({
       job,
       pricing: {
+        basePrice: pricing.basePrice,
         jobPrice: pricing.jobPrice,
         serviceFee: pricing.serviceFee,
         processingFee: pricing.processingFee,
+        extrasTotal: pricing.extrasTotal,
         customerTotal: pricing.customerTotal,
         providerPayout: pricing.providerPayout,
+        platformRevenue: pricing.platformRevenue,
+        multipliers: {
+          scope: { value: pricing.scopeMultiplier, label: pricing.scopeLabel },
+          condition: { value: pricing.conditionMultiplier, label: pricing.conditionLabel },
+          demand: { value: pricing.demandMultiplier, label: pricing.demandLabel },
+          lotSize: { value: pricing.lotSizeMultiplier, label: pricing.lotSizeLabel },
+          urgency: { value: pricing.urgencyMultiplier, label: pricing.urgencyLabel },
+        },
+        surgeLevel: pricing.surgeLevel,
+        priceWasCapped: pricing.priceWasCapped,
       },
     }, { status: 201 });
   } catch (error: any) {
