@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { geocodeAddress } from '@/lib/google-maps';
+import { calculatePricing } from '@/lib/constants';
+import { broadcastJobToProviders } from '@/lib/notifications';
 
 // GET /api/jobs — list jobs (broadcast for pros, own for customers)
 export async function GET(request: Request) {
@@ -36,7 +38,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    let { customerId, zipCode, address, latitude, longitude, placeId, serviceType, tier, price, providerId } = body;
+    let { customerId, zipCode, address, latitude, longitude, placeId, serviceType, tier, price, providerId, customerNotes } = body;
 
     if (!zipCode) {
       return NextResponse.json({ error: 'zipCode is required' }, { status: 400 });
@@ -68,6 +70,10 @@ export async function POST(request: Request) {
       }
     }
 
+    // Calculate pricing with platform fees
+    const jobPrice = price || 45;
+    const pricing = calculatePricing(jobPrice);
+
     const job = await db.job.create({
       data: {
         customerId,
@@ -78,13 +84,35 @@ export async function POST(request: Request) {
         placeId: placeId || null,
         serviceType: serviceType || 'mowing',
         tier: tier || 'basic',
-        price: price || 45,
+        price: jobPrice,
+        serviceFee: pricing.serviceFee,
+        processingFee: pricing.processingFee,
+        customerTotal: pricing.customerTotal,
+        providerPayout: pricing.providerPayout,
+        customerNotes: customerNotes || null,
         providerId: providerId || null,
         status: providerId ? 'pending_claim' : 'broadcast',
+        broadcastedAt: !providerId ? new Date() : null,
       },
     });
 
-    return NextResponse.json({ job }, { status: 201 });
+    // 🔔 Broadcast to eligible providers (non-blocking)
+    if (!providerId) {
+      broadcastJobToProviders(job.id).catch((err) => {
+        console.error('Broadcast error:', err);
+      });
+    }
+
+    return NextResponse.json({
+      job,
+      pricing: {
+        jobPrice: pricing.jobPrice,
+        serviceFee: pricing.serviceFee,
+        processingFee: pricing.processingFee,
+        customerTotal: pricing.customerTotal,
+        providerPayout: pricing.providerPayout,
+      },
+    }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

@@ -14,20 +14,37 @@ datasource db {
 
 // ── Users ───────────────────────────────────────────────────────────
 model User {
-  id        String   @id @default(cuid())
-  email     String?  @unique
-  phone     String?  @unique
-  name      String?
-  avatarUrl String?
-  role      String   @default("customer") // "customer" | "provider"
+  id          String   @id @default(cuid())
+  supabaseId  String?  @unique // Supabase Auth UID — links auth to our DB
+  email       String?  @unique
+  phone       String?  @unique
+  name        String?
+  avatarUrl   String?
+  role        String   @default("customer") // "customer" | "pro" | "admin"
+
+  // ── Profile Fields ──
+  address     String?
+  city        String?
+  state       String?
+  zipCode     String?
+  latitude    Float?   // Home location for distance calculations
+  longitude   Float?
+
+  // ── Account Status ──
+  isActive    Boolean  @default(true)
+  lastLoginAt DateTime?
+  onboardedAt DateTime? // When they completed onboarding
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  provider         Provider?
-  jobsAsCustomer   Job[]      @relation("CustomerJobs")
-  reviewsGiven     Review[]   @relation("ReviewAuthor")
-  tipsGiven        Tip[]      @relation("TipGiver")
+  provider              Provider?
+  jobsAsCustomer        Job[]                  @relation("CustomerJobs")
+  reviewsGiven          Review[]               @relation("ReviewAuthor")
+  tipsGiven             Tip[]                  @relation("TipGiver")
+  notifications         Notification[]
+  notificationPrefs     NotificationPreference?
 }
 
 // ── Providers (Pro Profiles) ────────────────────────────────────────
@@ -42,16 +59,23 @@ model Provider {
   reviewCount     Int      @default(0)
   isVerified      Boolean  @default(false)
   isActive        Boolean  @default(true)
+  serviceTypes    String   @default("[]") // JSON array of service types
   zipCodes        String   @default("[]") // JSON array of zip codes served
   latitude        Float?   // Provider home base lat
   longitude       Float?   // Provider home base lng
   serviceRadiusMi Float    @default(20) // Max service radius in miles
-  stripeAccountId String?                 // Stripe Connect ID (wired, not active yet)
+  stripeAccountId String?                 // Stripe Connect ID
   insuranceStatus String   @default("pending") // pending | verified | flagged
   riskTier        Int      @default(1)
   avatarUrl       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+
+  // ── Payout Info ──
+  bankLinked      Boolean  @default(false)
+  totalEarnings   Float    @default(0) // Lifetime earnings
+  pendingPayout   Float    @default(0) // Unpaid balance
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -63,37 +87,47 @@ model Provider {
 
 // ── Jobs ────────────────────────────────────────────────────────────
 model Job {
-  id             String    @id @default(cuid())
-  customerId     String
-  providerId     String?
-  status         String    @default("broadcast")
+  id               String    @id @default(cuid())
+  customerId       String
+  providerId       String?
+  status           String    @default("broadcast")
   // broadcast → pending_claim → active → en_route → in_progress → completed | cancelled
-  serviceType    String    @default("mowing")
-  tier           String    @default("basic") // basic | premium
-  zipCode        String
-  address        String    @default("")
-  latitude       Float?    // Job location lat
-  longitude      Float?    // Job location lng
-  placeId        String?   // Google Place ID for the address
-  price          Float     @default(45.0)
-  photoBeforeUrl String?
-  photoAfterUrl  String?
-  conditionNotes String?   // Yard Vision AI output
-  aiWarning      Boolean   @default(false)
-  aiProvider     String?   // "local" | "cloud" — which AI assessed it
-  etaMinutes     Int?
-  pendingProId   String?
-  claimedAt      DateTime?
-  completedAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  serviceType      String    @default("mowing")
+  tier             String    @default("basic") // basic | premium
+  zipCode          String
+  address          String    @default("")
+  latitude         Float?    // Job location lat
+  longitude        Float?    // Job location lng
+  placeId          String?   // Google Place ID for the address
+  price            Float     @default(45.0)
+  serviceFee       Float     @default(0)    // Platform service fee charged
+  processingFee    Float     @default(2.50) // Processing fee charged
+  customerTotal    Float     @default(0)    // Total charged to customer
+  providerPayout   Float     @default(0)    // Amount provider receives
+  paymentIntentId  String?   // Stripe PaymentIntent ID
+  photoBeforeUrl   String?
+  photoAfterUrl    String?
+  conditionNotes   String?   // Yard Vision AI output
+  aiWarning        Boolean   @default(false)
+  aiProvider       String?   // "local" | "cloud" — which AI assessed it
+  etaMinutes       Int?
+  pendingProId     String?
+  customerNotes    String?   // Special instructions from customer
+  broadcastedAt    DateTime? // When the job was sent to providers
+  claimedAt        DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  cancelReason     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Relations
-  customer User      @relation("CustomerJobs", fields: [customerId], references: [id])
-  provider Provider? @relation("ProviderJobs", fields: [providerId], references: [id])
-  claims   Claim[]
-  review   Review?
-  tip      Tip?
+  customer      User           @relation("CustomerJobs", fields: [customerId], references: [id])
+  provider      Provider?      @relation("ProviderJobs", fields: [providerId], references: [id])
+  claims        Claim[]
+  review        Review?
+  tip           Tip?
+  notifications Notification[]
 }
 
 // ── Claims (The "Race") ─────────────────────────────────────────────
@@ -134,7 +168,7 @@ model Tip {
   customerId        String
   providerId        String
   amount            Float    // Tip amount in dollars
-  stripePaymentId   String?  // Stripe PaymentIntent ID (wired, not active yet)
+  stripePaymentId   String?  // Stripe PaymentIntent ID
   status            String   @default("pending") // pending | processing | completed | failed
   createdAt         DateTime @default(now())
 
@@ -142,6 +176,61 @@ model Tip {
   job      Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
   customer User     @relation("TipGiver", fields: [customerId], references: [id])
   provider Provider @relation("TipReceiver", fields: [providerId], references: [id])
+}
+
+// ── Notifications ───────────────────────────────────────────────────
+// Stores every alert sent to users (for audit trail + in-app inbox)
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  jobId       String?  // Related job, if applicable
+  type        String   // "job_broadcast" | "job_claimed" | "job_completed" | "payment" | "review" | "system"
+  channel     String   // "email" | "sms" | "push" | "in_app"
+  title       String
+  body        String
+  isRead      Boolean  @default(false)
+  isSent      Boolean  @default(false) // Whether the external notification was delivered
+  sentAt      DateTime?
+  readAt      DateTime?
+  metadata    String?  // JSON blob for extra context (jobPrice, providerName, etc.)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId, type])
+}
+
+// ── Notification Preferences ────────────────────────────────────────
+// Per-user settings for how they want to be alerted
+model NotificationPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // Channel toggles
+  emailEnabled Boolean @default(true)
+  smsEnabled   Boolean @default(false) // Requires verified phone
+  pushEnabled  Boolean @default(false) // Requires PWA subscription
+
+  // What to notify about
+  jobBroadcast   Boolean @default(true)  // New jobs in your area
+  jobClaimed     Boolean @default(true)  // Your job was claimed
+  jobCompleted   Boolean @default(true)  // Job marked complete
+  paymentReceived Boolean @default(true) // Payment processed
+  reviewReceived Boolean @default(true)  // New review on your profile
+  marketing      Boolean @default(false) // Promotions & updates
+
+  // Quiet hours (provider-side)
+  quietStart String? // "22:00" — don't send between these
+  quietEnd   String? // "07:00"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ── Yard Vision Scans ───────────────────────────────────────────────
@@ -158,3 +247,4 @@ model YardScan {
   processingMs    Int?     // How long the scan took
   createdAt       DateTime @default(now())
 }
+
