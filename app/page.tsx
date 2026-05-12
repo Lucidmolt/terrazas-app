@@ -30,6 +30,22 @@ export default function HomePage() {
   const [mapScale, setMapScale] = useState(1);
   const [pinVisible, setPinVisible] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [mapCenter, setMapCenter] = useState({ lat: 37.0439, lng: -100.921 }); // Liberal, KS default
+  const [mapZoom, setMapZoom] = useState(13);
+
+  // ── Hydration-safe mount ──────────────────────────────────────────
+  useEffect(() => {
+    setMounted(true);
+    // Get user location once on mount
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setMapCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {}, // Keep Liberal, KS default
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
+      );
+    }
+  }, []);
 
   // ── Broadcast Countdown Timer ────────────────────────────────────
   useEffect(() => {
@@ -74,6 +90,7 @@ export default function HomePage() {
       setView('provider-choice');
       setMapScale(1.2);
       setPinVisible(true);
+      setMapZoom(15);
     } catch (err) {
       console.error('[Terrazas] checkZip failed:', err);
     } finally {
@@ -161,20 +178,71 @@ export default function HomePage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Google Maps JS API — loads once, renders live map, works with referrer restrictions
+  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || 'AIzaSyDzEirMQ11PgzxW1lREvX9F5ogLK3evZCQ';
+  const mapContainerRef = React.useRef<HTMLDivElement>(null);
+  const mapInstanceRef = React.useRef<any>(null);
+
+  useEffect(() => {
+    if (!mounted || !mapContainerRef.current) return;
+    // Only load the script once
+    if (!(window as any).google?.maps) {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}`;
+      script.async = true;
+      script.onload = () => initMap();
+      document.head.appendChild(script);
+    } else {
+      initMap();
+    }
+
+    function initMap() {
+      if (!mapContainerRef.current || mapInstanceRef.current) return;
+      mapInstanceRef.current = new (window as any).google.maps.Map(mapContainerRef.current, {
+        center: { lat: mapCenter.lat, lng: mapCenter.lng },
+        zoom: mapZoom,
+        disableDefaultUI: true,
+        gestureHandling: 'none',
+        zoomControl: false,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        keyboardShortcuts: false,
+        clickableIcons: false,
+        styles: [
+          { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+          { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+          { featureType: 'all', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+        ],
+      });
+    }
+  }, [mounted, mapsKey]);
+
+  // Update map center/zoom when they change
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.panTo({ lat: mapCenter.lat, lng: mapCenter.lng });
+      mapInstanceRef.current.setZoom(mapZoom);
+    }
+  }, [mapCenter, mapZoom]);
+
   return (
     <div className="flex flex-col h-screen w-screen bg-white relative">
-      {/* Map Background */}
+      {/* Live Google Maps Background */}
       <div className="absolute inset-0 z-0 transition-all duration-1000 origin-center" style={{ transform: `scale(${mapScale})` }}>
-        <div className="absolute inset-0 bg-slate-200">
-          <img src="https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=1200&q=80" className="w-full h-full object-cover grayscale-[20%] opacity-40" alt="Map" />
-          <div className="map-gradient absolute inset-0 pointer-events-none" />
+        <div className="absolute inset-0">
+          <div ref={mapContainerRef} className="w-full h-full" style={{ filter: 'saturate(0.85) brightness(1.05)' }} />
+          {/* Gradient overlay for readability */}
+          <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0.5) 70%, rgba(255,255,255,0.95) 100%)' }} />
         </div>
-        <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 transition-transform duration-500 ${pinVisible ? 'scale-100' : 'scale-0'}`}>
-          <div className="relative">
-            <div className="absolute -inset-6 bg-brand-500/20 rounded-full animate-ping" />
-            <div className="w-6 h-6 bg-brand-600 rounded-full border-4 border-white shadow-2xl" />
+        {pinVisible && (
+          <div className="absolute top-[38%] left-1/2 -translate-x-1/2 -translate-y-1/2 transition-transform duration-500 z-10">
+            <div className="relative">
+              <div className="absolute -inset-6 bg-brand-500/20 rounded-full animate-ping" />
+              <div className="w-6 h-6 bg-brand-600 rounded-full border-4 border-white shadow-2xl" />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Header */}
@@ -370,10 +438,10 @@ export default function HomePage() {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="relative z-30 p-4 pb-10 bg-white border-t border-slate-50 flex justify-around items-center shrink-0 safe-bottom md:hidden">
+      <nav className="relative z-30 p-4 pb-10 bg-white border-t border-slate-50 flex justify-around items-center shrink-0 safe-bottom">
         <button onClick={goHome} className="w-14 h-14 flex items-center justify-center rounded-4xl bg-brand-50 text-brand-600">🏠</button>
-        <a href="/track" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">🗓️</a>
-        <a href="/login" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">👤</a>
+        <a href="/dashboard" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">🗓️</a>
+        <a href="/dashboard" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">👤</a>
       </nav>
 
       {/* Loader */}
