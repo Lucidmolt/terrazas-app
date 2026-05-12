@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const jobs = await db.job.findMany({
       where,
       include: {
-        provider: { select: { id: true, businessName: true, rating: true, avatarUrl: true } },
+        provider: { select: { id: true, businessName: true, rating: true, reviewCount: true, avatarUrl: true, logoUrl: true, bio: true, portfolioPhotos: true, isVerified: true, profileStatus: true } },
         customer: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: 'desc' },

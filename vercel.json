@@ -1,5 +1,11 @@
 {
   "version": 2,
   "name": "terrazas-app",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/auto-approve",
+      "schedule": "* * * * *"
+    }
+  ]
 }

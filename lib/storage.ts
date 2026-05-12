@@ -1,0 +1,88 @@
+// ── Supabase Storage Layer ──────────────────────────────────────────
+// Handles all image uploads: yard photos, provider logos, portfolio, completion photos
+// Uses Supabase Storage with public bucket for easy URL access
+
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+const BUCKET = 'terrazas-uploads';
+
+export type UploadFolder = 'yards' | 'logos' | 'portfolio' | 'completion' | 'profiles';
+
+// ── Upload Image ──────────────────────────────────────────────────
+export async function uploadImage(
+  file: Buffer | Uint8Array,
+  folder: UploadFolder,
+  fileName: string,
+  contentType: string = 'image/jpeg'
+): Promise<{ url: string; path: string } | null> {
+  try {
+    const path = `${folder}/${Date.now()}_${fileName}`;
+
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, file, {
+        contentType,
+        upsert: false,
+      });
+
+    if (error) {
+      console.error('[Storage] Upload error:', error);
+      // If bucket doesn't exist, try to create it
+      if (error.message?.includes('not found') || error.message?.includes('Bucket')) {
+        await ensureBucket();
+        // Retry
+        const retry = await supabase.storage.from(BUCKET).upload(path, file, { contentType, upsert: false });
+        if (retry.error) {
+          console.error('[Storage] Retry failed:', retry.error);
+          return null;
+        }
+        const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(retry.data.path);
+        return { url: urlData.publicUrl, path: retry.data.path };
+      }
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(data.path);
+    return { url: urlData.publicUrl, path: data.path };
+  } catch (error) {
+    console.error('[Storage] Upload exception:', error);
+    return null;
+  }
+}
+
+// ── Delete Image ──────────────────────────────────────────────────
+export async function deleteImage(path: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.storage.from(BUCKET).remove([path]);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// ── Ensure Bucket Exists ──────────────────────────────────────────
+async function ensureBucket() {
+  try {
+    const { error } = await supabase.storage.createBucket(BUCKET, {
+      public: true,
+      fileSizeLimit: 10 * 1024 * 1024, // 10MB max
+      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
+    });
+    if (error && !error.message?.includes('already exists')) {
+      console.error('[Storage] Bucket creation error:', error);
+    }
+  } catch (e) {
+    console.error('[Storage] Bucket error:', e);
+  }
+}
+
+// ── Get Public URL ────────────────────────────────────────────────
+export function getPublicUrl(path: string): string {
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}

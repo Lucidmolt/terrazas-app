@@ -5,17 +5,18 @@ import { db } from '@/lib/db';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, email, phone, role, businessName, selectedServices, zipCodes } = body;
+    const {
+      name, email, phone, role, businessName, selectedServices, zipCodes,
+      bio, logoUrl, portfolioPhotos, yearsInBusiness, teamSize, equipmentType,
+      googlePlaceId, tosAccepted,
+    } = body;
 
     if (!name || !email) {
       return NextResponse.json({ error: 'Name and email are required' }, { status: 400 });
     }
 
     // Check if user already exists
-    const existingUser = await db.user.findFirst({
-      where: { email },
-    });
-
+    const existingUser = await db.user.findFirst({ where: { email } });
     if (existingUser) {
       return NextResponse.json({ error: 'An account with this email already exists. Please sign in.' }, { status: 409 });
     }
@@ -23,10 +24,13 @@ export async function POST(request: Request) {
     // Create user
     const user = await db.user.create({
       data: {
-        name,
-        email,
+        name, email,
         phone: phone || null,
         role: role === 'pro' ? 'pro' : 'customer',
+        zipCode: zipCodes?.[0] || null,
+        tosAcceptedAt: tosAccepted ? new Date() : null,
+        tosVersion: tosAccepted ? '1.0' : null,
+        onboardedAt: new Date(),
       },
     });
 
@@ -37,12 +41,23 @@ export async function POST(request: Request) {
         data: {
           userId: user.id,
           businessName,
+          phone: phone || null,
+          email: email || null,
+          googlePlaceId: googlePlaceId || null,
           serviceTypes: JSON.stringify(selectedServices || []),
           zipCodes: JSON.stringify(zipCodes || []),
           isActive: true,
-          isVerified: false, // Manual verification required
+          isVerified: false,
           rating: 0,
           reviewCount: 0,
+          // Profile fields
+          logoUrl: logoUrl || null,
+          bio: bio || null,
+          portfolioPhotos: JSON.stringify(portfolioPhotos || []),
+          yearsInBusiness: yearsInBusiness ? parseInt(String(yearsInBusiness)) : null,
+          teamSize: teamSize || null,
+          equipmentType: equipmentType || null,
+          profileStatus: bio && logoUrl ? 'pending_review' : 'draft',
         },
       });
     }
