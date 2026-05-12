@@ -31,9 +31,11 @@ model User {
   longitude   Float?
 
   // ── Account Status ──
-  isActive    Boolean  @default(true)
-  lastLoginAt DateTime?
-  onboardedAt DateTime? // When they completed onboarding
+  isActive       Boolean  @default(true)
+  lastLoginAt    DateTime?
+  onboardedAt    DateTime? // When they completed onboarding
+  tosAcceptedAt  DateTime? // When they accepted Terms of Service
+  tosVersion     String?   // Which TOS version they accepted
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -69,6 +71,20 @@ model Provider {
   riskTier        Int      @default(1)
   avatarUrl       String?
 
+  // ── Profile (customer-facing) ──
+  logoUrl          String?  // Business logo
+  bio              String?  // About the business (min 150 chars)
+  portfolioPhotos  String   @default("[]") // JSON array of photo URLs
+  yearsInBusiness  Int?     // Self-reported
+  teamSize         String?  // "solo" | "small" | "medium"
+  equipmentType    String?  // "residential" | "commercial"
+  profileStatus    String   @default("draft") // draft | pending_review | verified | rejected
+  rejectionReason  String?  // Why admin rejected
+
+  // ── Veto Tracking ──
+  vetoCount        Int      @default(0) // Rolling veto count (resets weekly)
+  lastVetoAt       DateTime?
+
   // ── Payout Info ──
   bankLinked      Boolean  @default(false)
   totalEarnings   Float    @default(0) // Lifetime earnings
@@ -83,6 +99,7 @@ model Provider {
   claims   Claim[]
   reviews  Review[] @relation("ReviewSubject")
   tips     Tip[]    @relation("TipReceiver")
+  vetosReceived Veto[] @relation("VetoedProvider")
 }
 
 // ── Jobs ────────────────────────────────────────────────────────────
@@ -139,8 +156,17 @@ model Job {
   pendingProId     String?
   customerNotes    String?   // Special instructions from customer
   surgeLevel       String?   // low | normal | busy | high | peak
+
+  // ── Veto / Approval ──
+  blockedProviders String    @default("[]") // JSON array of vetoed provider IDs
+  vetoCount        Int       @default(0)    // How many vetos on this job
+  vetoReasons      String    @default("[]") // JSON array of veto reasons for analytics
+  approvalDeadline DateTime? // claim time + 10 min (auto-approve if not acted on)
+  autoApproved     Boolean   @default(false)
+
   broadcastedAt    DateTime? // When the job was sent to providers
   claimedAt        DateTime?
+  approvedAt       DateTime? // When customer approved (or auto-approved)
   completedAt      DateTime?
   cancelledAt      DateTime?
   cancelReason     String?
@@ -154,6 +180,7 @@ model Job {
   review        Review?
   tip           Tip?
   notifications Notification[]
+  vetos         Veto[]
 }
 
 // ── Claims (The "Race") ─────────────────────────────────────────────
@@ -168,6 +195,23 @@ model Claim {
   // Relations
   job      Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
   provider Provider @relation(fields: [providerId], references: [id])
+}
+
+// ── Vetos (Customer rejections of providers) ────────────────────────
+model Veto {
+  id         String   @id @default(cuid())
+  jobId      String
+  providerId String   // Who was vetoed
+  customerId String   // Who vetoed them
+  reason     String?  // Optional: "low_rating" | "no_portfolio" | "prefer_other" | "long_eta" | "other"
+  createdAt  DateTime @default(now())
+
+  // Relations
+  job      Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  provider Provider @relation("VetoedProvider", fields: [providerId], references: [id])
+
+  @@index([providerId])
+  @@index([jobId])
 }
 
 // ── Reviews ─────────────────────────────────────────────────────────
