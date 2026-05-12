@@ -50,7 +50,7 @@ export const CLAIM_RADIUS_MILES = 120; // Liberal, KS launch zone
 // Provider receives: job price (minus platform commission)
 export const FEES = {
   // Platform service fee — percentage charged to customer on top of job price
-  SERVICE_FEE_PERCENT: 0.15, // 15%
+  SERVICE_FEE_PERCENT: 0.13, // 13%
   // Fixed processing fee per transaction (covers Stripe fees + margin)
   PROCESSING_FEE: 2.50,
   // Minimum service fee (floor)
