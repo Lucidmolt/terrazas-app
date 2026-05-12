@@ -17,13 +17,41 @@ function OnboardingContent() {
   });
   const [loading, setLoading] = useState(false);
 
+  const [error, setError] = useState('');
+
   const handleSubmit = async () => {
     setLoading(true);
-    // For local dev, simulate onboarding success
-    setTimeout(() => {
+    setError('');
+
+    try {
+      const res = await fetch('/api/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          role,
+          businessName: formData.businessName,
+          selectedServices: formData.selectedServices,
+          zipCodes: formData.zipCodes,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Something went wrong');
+        setLoading(false);
+        return;
+      }
+
+      // Success — redirect to login so they can sign in
+      router.push(`/login?role=${role}&onboarded=true`);
+    } catch {
+      setError('Network error — please try again');
       setLoading(false);
-      router.push(role === 'pro' ? '/pro' : '/');
-    }, 1500);
+    }
   };
 
   const updateField = (field: string, value: any) => {

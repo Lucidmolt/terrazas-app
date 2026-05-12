@@ -44,6 +44,43 @@ export const TIP_PRESETS = [5, 10, 15, 20, 25] as const;
 export const BROADCAST_WINDOW_SECONDS = 15 * 60; // 15 minutes
 export const CLAIM_RADIUS_MILES = 120; // Liberal, KS launch zone
 
+// ── Platform Fee Structure ──────────────────────────────────────────
+// This is how Terrazas.app generates revenue.
+// Customer pays: job price + service fee + processing fee
+// Provider receives: job price (minus platform commission)
+export const FEES = {
+  // Platform service fee — percentage charged to customer on top of job price
+  SERVICE_FEE_PERCENT: 0.15, // 15%
+  // Fixed processing fee per transaction (covers Stripe fees + margin)
+  PROCESSING_FEE: 2.50,
+  // Minimum service fee (floor)
+  MIN_SERVICE_FEE: 5.00,
+  // Provider commission — percentage Terrazas keeps from the provider's payout
+  PROVIDER_COMMISSION_PERCENT: 0.10, // 10%
+} as const;
+
+// Helper: calculate full price breakdown for a job
+export function calculatePricing(jobPrice: number, tipAmount: number = 0) {
+  const serviceFee = Math.max(
+    jobPrice * FEES.SERVICE_FEE_PERCENT,
+    FEES.MIN_SERVICE_FEE
+  );
+  const processingFee = FEES.PROCESSING_FEE;
+  const customerTotal = jobPrice + serviceFee + processingFee + tipAmount;
+  const platformRevenue = serviceFee + processingFee + (jobPrice * FEES.PROVIDER_COMMISSION_PERCENT);
+  const providerPayout = jobPrice * (1 - FEES.PROVIDER_COMMISSION_PERCENT) + tipAmount;
+
+  return {
+    jobPrice:       Math.round(jobPrice * 100) / 100,
+    serviceFee:     Math.round(serviceFee * 100) / 100,
+    processingFee,
+    tipAmount:      Math.round(tipAmount * 100) / 100,
+    customerTotal:  Math.round(customerTotal * 100) / 100,
+    providerPayout: Math.round(providerPayout * 100) / 100,
+    platformRevenue: Math.round(platformRevenue * 100) / 100,
+  };
+}
+
 // ── Launch Zone: Liberal, KS ────────────────────────────────────────
 // 120-mile radius covers SW Kansas, OK panhandle, TX panhandle, SE Colorado
 export const LAUNCH_ZONE = {

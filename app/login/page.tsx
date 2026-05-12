@@ -2,6 +2,7 @@
 
 import React, { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { createClient } from '@/lib/supabase-browser';
 
 function LoginContent() {
   const router = useRouter();
@@ -13,21 +14,84 @@ function LoginContent() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const supabase = createClient();
 
   const handleCustomerLogin = async () => {
     if (!email) return;
     setLoading(true);
-    // For local dev, just redirect — real auth comes with Supabase/NextAuth later
-    setMessage('✅ Demo mode — redirecting to home...');
-    setTimeout(() => router.push('/'), 1500);
+    setError('');
+
+    const { error: authError } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/confirm`,
+        data: { role: 'customer' },
+      },
+    });
+
+    if (authError) {
+      setError(authError.message);
+      setLoading(false);
+      return;
+    }
+
+    setMessage('✅ Magic link sent! Check your email and click the link to sign in.');
     setLoading(false);
   };
 
   const handleProLogin = async () => {
     if (!phone) return;
     setLoading(true);
-    setMessage('✅ Demo mode — redirecting to Pro dashboard...');
-    setTimeout(() => router.push('/pro'), 1500);
+    setError('');
+
+    // Format phone to E.164
+    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone.replace(/\D/g, '')}`;
+
+    const { error: authError } = await supabase.auth.signInWithOtp({
+      phone: formattedPhone,
+      options: {
+        data: { role: 'pro' },
+      },
+    });
+
+    if (authError) {
+      // If SMS isn't configured, fall back to email-based pro login
+      if (authError.message.includes('not enabled') || authError.message.includes('provider')) {
+        setError('SMS login not yet available. Please use email login for now.');
+        setLoading(false);
+        return;
+      }
+      setError(authError.message);
+      setLoading(false);
+      return;
+    }
+
+    setMessage('✅ Verification code sent! Enter the 6-digit code below.');
+    setLoading(false);
+  };
+
+  const handleEmailProLogin = async () => {
+    if (!email) return;
+    setLoading(true);
+    setError('');
+
+    const { error: authError } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/confirm?role=pro`,
+        data: { role: 'pro' },
+      },
+    });
+
+    if (authError) {
+      setError(authError.message);
+      setLoading(false);
+      return;
+    }
+
+    setMessage('✅ Magic link sent! Check your email and click the link to sign in.');
     setLoading(false);
   };
 
@@ -43,54 +107,89 @@ function LoginContent() {
 
         {/* Role Toggle */}
         <div className="flex bg-white rounded-4xl p-1 border border-slate-100 shadow-sm">
-          <button onClick={() => { setRole('customer'); setMessage(''); }}
+          <button onClick={() => { setRole('customer'); setMessage(''); setError(''); }}
             className={`flex-1 py-3 rounded-[1.8rem] text-sm font-bold transition-all ${role === 'customer' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
             Customer
           </button>
-          <button onClick={() => { setRole('pro'); setMessage(''); }}
-            className={`flex-1 py-3 rounded-[1.8rem] text-sm font-bold transition-all ${role === 'pro' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
-            Pro
+          <button onClick={() => { setRole('pro'); setMessage(''); setError(''); }}
+            className={`flex-1 py-3 rounded-[1.8rem] text-sm font-bold transition-all ${role === 'pro' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
+            Pro / Provider
           </button>
         </div>
 
-        {/* Login Form */}
         <div className="glass rounded-5xl p-8 shadow-2xl border border-white space-y-6">
           {role === 'customer' ? (
             <>
               <div className="space-y-2">
-                <label className="text-label ml-4">Email Address</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email</label>
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleCustomerLogin()}
-                  placeholder="you@email.com" className="input-field" />
-                <p className="text-[10px] text-slate-400 font-medium ml-4">We'll send a magic link — no password needed.</p>
+                  className="w-full px-5 py-4 rounded-3xl bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+                />
+                <p className="text-[10px] text-slate-400 font-medium ml-4">We&apos;ll send a magic link — no password needed.</p>
               </div>
-              <button onClick={handleCustomerLogin} disabled={loading || !email} className="btn-brand">
-                {loading ? 'Sending...' : 'Send Magic Link ✉️'}
+              <button
+                onClick={handleCustomerLogin}
+                disabled={loading || !email}
+                className="w-full py-4 rounded-3xl bg-brand-600 text-white font-bold text-base shadow-lg hover:shadow-xl hover:bg-brand-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
+                {loading ? '⏳ Sending...' : '✨ Send Magic Link'}
               </button>
             </>
           ) : (
             <>
               <div className="space-y-2">
-                <label className="text-label ml-4">Phone Number</label>
-                <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleProLogin()}
-                  placeholder="+1 (555) 000-0000" className="input-field" />
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email</label>
+                <input
+                  type="email"
+                  placeholder="pro@business.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleEmailProLogin()}
+                  className="w-full px-5 py-4 rounded-3xl bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+                />
+                <p className="text-[10px] text-slate-400 font-medium ml-4">Sign in with your registered email address.</p>
               </div>
-              <button onClick={handleProLogin} disabled={loading || !phone} className="btn-primary">
-                {loading ? 'Verifying...' : 'Send SMS Code 📱'}
+              <button
+                onClick={handleEmailProLogin}
+                disabled={loading || !email}
+                className="w-full py-4 rounded-3xl bg-emerald-600 text-white font-bold text-base shadow-lg hover:shadow-xl hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
+                {loading ? '⏳ Sending...' : '🔐 Send Pro Login Link'}
               </button>
             </>
           )}
-          {message && <p className="text-sm font-bold text-center text-brand-600 animate-fade-in">{message}</p>}
 
-          <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
-            <p className="text-[10px] font-bold text-amber-700 text-center">🔧 Dev Mode: Auth is mocked. Real auth will use Magic Link / OTP when connected to Supabase.</p>
+          {/* Messages */}
+          {message && (
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100">
+              <p className="text-sm text-emerald-700 font-medium">{message}</p>
+            </div>
+          )}
+          {error && (
+            <div className="p-4 rounded-2xl bg-red-50 border border-red-100">
+              <p className="text-sm text-red-700 font-medium">⚠️ {error}</p>
+            </div>
+          )}
+
+          {/* Sign up link */}
+          <div className="text-center pt-2">
+            <p className="text-xs text-slate-400">
+              {role === 'customer' ? (
+                <>New here? Just enter your email — we&apos;ll create your account automatically.</>
+              ) : (
+                <>Want to join as a provider? <a href="/onboarding?role=pro" className="text-emerald-600 font-bold hover:underline">Apply here →</a></>
+              )}
+            </p>
           </div>
         </div>
 
-        <div className="text-center">
-          <a href="/" className="text-micro text-slate-400 hover:text-slate-600 transition-colors">← Back to Home</a>
-        </div>
+        {/* Footer */}
+        <p className="text-center text-[10px] text-slate-400">
+          By signing in you agree to our Terms of Service and Privacy Policy.
+        </p>
       </div>
     </div>
   );
@@ -98,7 +197,7 @@ function LoginContent() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="w-12 h-12 border-4 border-brand-600 border-t-transparent rounded-full animate-spin" /></div>}>
+    <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center"><p className="text-slate-400">Loading...</p></div>}>
       <LoginContent />
     </Suspense>
   );
