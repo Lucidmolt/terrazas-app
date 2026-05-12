@@ -7,13 +7,17 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="js/app.js" defer></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
-        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-        .map-gradient { background: linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 15%, rgba(255,255,255,0) 70%, rgba(255,255,255,1) 100%); }
+        .glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+        .map-gradient { background: linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,0.2) 20%, rgba(255,255,255,0.2) 80%, rgba(255,255,255,1) 100%); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
-        .tier-selected { border-color: #10b981; background: #f0fdf4; }
+        .tier-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .tier-card:active { transform: scale(0.96); }
+        @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .animate-pulse-soft { animation: pulse-soft 3s ease-in-out infinite; }
         @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
         .scan-line { animation: scan 2s linear infinite; background: linear-gradient(to bottom, transparent, #10b981, transparent); }
         
@@ -95,6 +99,20 @@
                         </button>
                     </div>
 
+                    <!-- Yard Vision Pricing Guard -->
+                    <button id="ai-vision-btn" class="w-full bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-[2.5rem] p-5 flex items-center justify-between group hover:border-emerald-400 transition-all active:scale-95">
+                        <div class="flex items-center space-x-4">
+                            <div class="w-14 h-14 bg-white rounded-2xl flex items-center justify-center text-3xl shadow-sm">📸</div>
+                            <div class="text-left">
+                                <div class="text-sm font-black text-slate-900 tracking-tight">Yard Verification</div>
+                                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Snap a photo for instant quote lock</div>
+                            </div>
+                        </div>
+                        <div class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-xs">
+                            <i class="fas fa-camera"></i>
+                        </div>
+                    </button>
+
                     <div class="p-5 bg-emerald-50/50 rounded-[2.5rem] border border-emerald-100/50">
                         <h3 class="text-xs font-black text-emerald-800 uppercase tracking-widest mb-2">Why Terrazas?</h3>
                         <p class="text-[11px] font-bold text-emerald-700 leading-relaxed">Instantly book verified lawn professionals. No phone calls, no waiting for quotes.</p>
@@ -120,10 +138,13 @@
 
                         <!-- Broadcast -->
                         <div onclick="showTiers()" class="p-5 bg-emerald-600 text-white rounded-[2rem] flex items-center space-x-4 cursor-pointer shadow-xl shadow-emerald-100 active:scale-95 transition-all">
-                            <div class="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center text-3xl">📡</div>
+                            <div class="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center text-3xl relative">
+                                📡
+                                <div class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-emerald-600 animate-pulse"></div>
+                            </div>
                             <div class="flex-1">
                                 <div class="font-black">Broadcast Job</div>
-                                <div class="text-[10px] opacity-80 font-bold uppercase tracking-widest">Fastest: First pro to grab wins</div>
+                                <div class="text-[10px] opacity-80 font-bold uppercase tracking-widest">Instant Dispatch • 14 Pros Active</div>
                             </div>
                         </div>
                     </div>
@@ -131,9 +152,14 @@
 
                 <!-- View: Preferred List -->
                 <div id="view-preferred" class="hidden space-y-5 animate-in fade-in duration-500">
-                    <div class="flex items-center space-x-4">
-                        <button onclick="showProviderChoice()" class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center font-bold">←</button>
-                        <h2 class="text-xl font-black text-slate-900 tracking-tight">Preferred Pros</h2>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <button onclick="showProviderChoice()" class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center font-bold">←</button>
+                            <h2 class="text-xl font-black text-slate-900 tracking-tight">Preferred Pros</h2>
+                        </div>
+                        <div class="px-3 py-1 bg-emerald-100 rounded-full">
+                            <span class="text-[10px] font-black text-emerald-700 uppercase">Verified</span>
+                        </div>
                     </div>
 
                     <div class="space-y-2 overflow-y-auto max-h-[40vh] no-scrollbar">
@@ -161,9 +187,14 @@
 
                 <!-- View: Tiers (Broadcast) -->
                 <div id="view-tiers" class="hidden space-y-5 animate-in fade-in duration-500">
-                    <div class="flex items-center space-x-4">
-                        <button onclick="showProviderChoice()" class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center font-bold">←</button>
-                        <h2 class="text-xl font-black text-slate-900 tracking-tight">Select Tier</h2>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <button onclick="showProviderChoice()" class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center font-bold">←</button>
+                            <h2 class="text-xl font-black text-slate-900 tracking-tight">Service Tier</h2>
+                        </div>
+                        <div class="px-3 py-1 bg-emerald-100 rounded-full">
+                            <span class="text-[10px] font-black text-emerald-700 uppercase">Licensed</span>
+                        </div>
                     </div>
 
                     <div class="space-y-2 overflow-y-auto max-h-[35vh] no-scrollbar">
@@ -183,7 +214,7 @@
                         </div>
                     </div>
 
-                    <button onclick="confirmTier()" class="w-full bg-slate-900 text-white py-5 rounded-[2rem] font-black text-lg shadow-2xl active:scale-95 transition-all">
+                    <button onclick="confirmTierBtn()" class="w-full bg-slate-900 text-white py-5 rounded-[2rem] font-black text-lg shadow-2xl active:scale-95 transition-all">
                         ORDER NOW ⚡️
                     </button>
                 </div>
@@ -205,6 +236,24 @@
                     <button onclick="goHome()" class="text-slate-400 font-black text-[10px] uppercase tracking-widest">Cancel Request</button>
                 </div>
 
+                <!-- View: Searching (Broadcast) -->
+                <div id="view-searching" class="hidden space-y-8 animate-in fade-in duration-500 text-center">
+                    <div class="relative w-32 h-32 mx-auto">
+                        <div class="absolute inset-0 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin"></div>
+                        <div class="absolute inset-4 rounded-full bg-emerald-500/10 flex items-center justify-center text-4xl">📡</div>
+                    </div>
+                    <div class="space-y-2">
+                        <h2 class="text-2xl font-black text-slate-900 tracking-tight">Broadcasting Order</h2>
+                        <p class="text-sm text-slate-500 font-bold px-6">Notifying pros within 20 miles of <span class="active-zip-label font-black text-emerald-600"></span>.</p>
+                    </div>
+                    <div class="bg-slate-50/50 rounded-[2rem] p-6 border border-slate-100">
+                        <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Claim Window</div>
+                        <div id="broadcast-timer" class="text-4xl font-black text-emerald-600 tabular-nums tracking-tighter">15:00</div>
+                    </div>
+                    <div class="text-[11px] text-slate-400 font-bold italic">"Pros typically claim within 3 minutes."</div>
+                    <button onclick="goHome()" class="text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors">Cancel & Return</button>
+                </div>
+
             </div>
         </main>
 
@@ -222,96 +271,6 @@
         </div>
     </div>
 
-    <script>
-        const SUPABASE_URL = "https://bjtowplfolvgiqrbhysg.supabase.co";
-        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJqdG93cGxmb2x2Z2lxcmJoeXNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwOTQwMTEsImV4cCI6MjA5MzY3MDAxMX0.yaku-lXWmZkDqHaGlbdGuJJCDNpOufdVHaCSEu1jlNk";
-        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        const views = ['view-zip', 'view-provider-choice', 'view-preferred', 'view-tiers', 'view-success'];
-        let activeZip = '';
-
-        function showView(id) {
-            views.forEach(v => document.getElementById(v).classList.add('hidden'));
-            document.getElementById(id).classList.remove('hidden');
-        }
-
-        function triggerLoader(duration, next) {
-            const loader = document.getElementById('loader');
-            loader.classList.remove('hidden');
-            setTimeout(() => {
-                loader.classList.add('hidden');
-                next();
-            }, duration);
-        }
-
-        async function checkZip() {
-            const val = document.getElementById('zip-input').value;
-            if (val.length < 5) return;
-            activeZip = val;
-            
-            triggerLoader(1000, async () => {
-                // Query Supabase for providers in this zip
-                const { data, error } = await _supabase
-                    .from('providers')
-                    .select('*')
-                    .filter('zip_codes', 'cs', `{"${activeZip}"}`);
-
-                if (error) {
-                    console.error('Error checking zip:', error);
-                    // For demo purposes, we'll continue if it's just a schema mismatch
-                    // but normally we'd stop.
-                }
-
-                showView('view-provider-choice');
-                document.querySelectorAll('.active-zip-label').forEach(el => el.innerText = activeZip);
-                document.getElementById('active-zip-text').innerText = activeZip;
-                document.getElementById('header-loc').classList.remove('md:hidden');
-                document.getElementById('header-zip').innerText = activeZip;
-                
-                // Map Animation
-                document.getElementById('map-hub').style.transform = 'scale(1.2) translateY(-20px)';
-                document.getElementById('active-pin').classList.remove('hidden');
-                setTimeout(() => document.getElementById('active-pin').classList.remove('scale-0'), 100);
-            });
-        }
-
-        function showProviderChoice() { showView('view-provider-choice'); }
-        function showPreferred() { showView('view-preferred'); }
-        function showTiers() { showView('view-tiers'); }
-
-        async function selectSpecificPro(name, rating, status) {
-            triggerLoader(800, async () => {
-                const { data, error } = await _supabase
-                    .from('jobs')
-                    .insert([{ zip_code: activeZip, tier: 'Preferred', status: 'pending' }]);
-
-                showView('view-success');
-                document.querySelector('#view-success h3').innerText = "Booking Preferred Pro...";
-                document.querySelector('#view-success p').innerHTML = `Routing job to <span class="font-black text-emerald-600">${name}</span>. Waiting for confirmation.`;
-            });
-        }
-
-        async function confirmTier() {
-            triggerLoader(600, async () => {
-                const { data, error } = await _supabase
-                    .from('jobs')
-                    .insert([{ zip_code: activeZip, tier: 'Broadcast', status: 'pending' }]);
-
-                showView('view-success');
-                document.querySelector('#view-success h3').innerText = "Job Broadcasted!";
-                document.querySelector('#view-success p').innerHTML = `We've alerted <span class="font-black text-emerald-600">14 Pros</span> near <span class="font-black">${activeZip}</span>.`;
-            });
-        }
-
-        function goHome() {
-            triggerLoader(400, () => {
-                showView('view-zip');
-                document.getElementById('header-loc').classList.add('md:hidden');
-                document.getElementById('map-hub').style.transform = 'scale(1)';
-                document.getElementById('active-pin').classList.add('scale-0');
-                document.getElementById('zip-input').value = '';
-            });
-        }
-    </script>
+    <script src="js/app.js" defer></script>
 </body>
 </html>

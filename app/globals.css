@@ -1,0 +1,192 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Terrazas.app Design System ────────────────────────────────────── */
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  /* ── Glass Effect ──────────────────────────────────────────────── */
+  .glass {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
+  .glass-dark {
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
+  /* ── Map Gradient Overlay ──────────────────────────────────────── */
+  .map-gradient {
+    background: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 1) 0%,
+      rgba(255, 255, 255, 0.2) 20%,
+      rgba(255, 255, 255, 0.2) 80%,
+      rgba(255, 255, 255, 1) 100%
+    );
+  }
+
+  /* ── Drawer (Bottom Sheet) ─────────────────────────────────────── */
+  .drawer {
+    @apply glass rounded-t-[3rem] shadow-[0_-15px_50px_rgba(0,0,0,0.1)] border border-white;
+  }
+
+  @media (min-width: 768px) {
+    .drawer {
+      @apply absolute top-[100px] left-10 w-[420px] rounded-[2.5rem];
+      height: calc(100vh - 140px);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    }
+  }
+
+  /* ── Tier Card ─────────────────────────────────────────────────── */
+  .tier-card {
+    @apply p-4 rounded-4xl border-2 bg-white flex items-center justify-between cursor-pointer transition-all;
+  }
+
+  .tier-card:active {
+    transform: scale(0.96);
+  }
+
+  .tier-card-selected {
+    @apply border-brand-500 bg-brand-50;
+  }
+
+  .tier-card-unselected {
+    @apply border-slate-100 bg-white hover:border-slate-200;
+  }
+
+  /* ── Provider Card ─────────────────────────────────────────────── */
+  .provider-card {
+    @apply p-4 bg-white border-2 border-slate-100 rounded-4xl flex items-center space-x-4 cursor-pointer transition-all;
+  }
+
+  .provider-card:hover {
+    @apply border-brand-500;
+  }
+
+  .provider-card-offline {
+    @apply opacity-50 pointer-events-none;
+  }
+
+  /* ── Primary Button ────────────────────────────────────────────── */
+  .btn-primary {
+    @apply w-full bg-slate-900 text-white py-5 rounded-4xl font-black text-lg shadow-2xl transition-all;
+  }
+
+  .btn-primary:active {
+    transform: scale(0.95);
+  }
+
+  .btn-primary:disabled {
+    @apply bg-slate-200 text-slate-400 shadow-none;
+  }
+
+  .btn-brand {
+    @apply w-full bg-brand-600 text-white py-5 rounded-4xl font-black text-lg shadow-xl shadow-brand-200 transition-all;
+  }
+
+  .btn-brand:active {
+    transform: scale(0.95);
+  }
+
+  /* ── Input ─────────────────────────────────────────────────────── */
+  .input-field {
+    @apply w-full bg-slate-50 border-2 border-slate-100 rounded-4xl p-5 font-bold placeholder:text-slate-300 focus:bg-white focus:border-brand-500 focus:outline-none transition-all;
+  }
+
+  /* ── Badge ─────────────────────────────────────────────────────── */
+  .badge {
+    @apply px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest;
+  }
+
+  .badge-verified {
+    @apply bg-brand-100 text-brand-700;
+  }
+
+  .badge-offline {
+    @apply bg-slate-100 text-slate-500;
+  }
+
+  .badge-live {
+    @apply bg-red-100 text-red-600;
+  }
+
+  /* ── Status Pill ───────────────────────────────────────────────── */
+  .status-pill {
+    @apply inline-flex items-center space-x-2 px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .text-micro {
+    @apply text-[10px] font-black uppercase tracking-widest;
+  }
+
+  .text-label {
+    @apply text-[10px] font-black text-slate-400 uppercase tracking-widest;
+  }
+
+  /* Scan line animation for Yard Vision */
+  .scan-line {
+    animation: scan 2s linear infinite;
+    background: linear-gradient(to bottom, transparent, #10b981, transparent);
+  }
+}
+
+@keyframes scan {
+  0% { top: 0; }
+  100% { top: 100%; }
+}
+
+/* Custom animations (extend Tailwind) */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}

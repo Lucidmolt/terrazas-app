@@ -1,0 +1,160 @@
+// ── Prisma Schema for Terrazas.app ──────────────────────────────────
+// PostgreSQL on Supabase. Uses connection pooler (pgbouncer) for queries
+// and direct connection for migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ── Users ───────────────────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  phone     String?  @unique
+  name      String?
+  avatarUrl String?
+  role      String   @default("customer") // "customer" | "provider"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  provider         Provider?
+  jobsAsCustomer   Job[]      @relation("CustomerJobs")
+  reviewsGiven     Review[]   @relation("ReviewAuthor")
+  tipsGiven        Tip[]      @relation("TipGiver")
+}
+
+// ── Providers (Pro Profiles) ────────────────────────────────────────
+model Provider {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  businessName    String
+  phone           String?
+  email           String?
+  googlePlaceId   String?
+  rating          Float    @default(0)
+  reviewCount     Int      @default(0)
+  isVerified      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  zipCodes        String   @default("[]") // JSON array of zip codes served
+  latitude        Float?   // Provider home base lat
+  longitude       Float?   // Provider home base lng
+  serviceRadiusMi Float    @default(20) // Max service radius in miles
+  stripeAccountId String?                 // Stripe Connect ID (wired, not active yet)
+  insuranceStatus String   @default("pending") // pending | verified | flagged
+  riskTier        Int      @default(1)
+  avatarUrl       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs     Job[]    @relation("ProviderJobs")
+  claims   Claim[]
+  reviews  Review[] @relation("ReviewSubject")
+  tips     Tip[]    @relation("TipReceiver")
+}
+
+// ── Jobs ────────────────────────────────────────────────────────────
+model Job {
+  id             String    @id @default(cuid())
+  customerId     String
+  providerId     String?
+  status         String    @default("broadcast")
+  // broadcast → pending_claim → active → en_route → in_progress → completed | cancelled
+  serviceType    String    @default("mowing")
+  tier           String    @default("basic") // basic | premium
+  zipCode        String
+  address        String    @default("")
+  latitude       Float?    // Job location lat
+  longitude      Float?    // Job location lng
+  placeId        String?   // Google Place ID for the address
+  price          Float     @default(45.0)
+  photoBeforeUrl String?
+  photoAfterUrl  String?
+  conditionNotes String?   // Yard Vision AI output
+  aiWarning      Boolean   @default(false)
+  aiProvider     String?   // "local" | "cloud" — which AI assessed it
+  etaMinutes     Int?
+  pendingProId   String?
+  claimedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  customer User      @relation("CustomerJobs", fields: [customerId], references: [id])
+  provider Provider? @relation("ProviderJobs", fields: [providerId], references: [id])
+  claims   Claim[]
+  review   Review?
+  tip      Tip?
+}
+
+// ── Claims (The "Race") ─────────────────────────────────────────────
+model Claim {
+  id            String   @id @default(cuid())
+  jobId         String
+  providerId    String
+  etaMinutes    Int      @default(30)
+  wasSuccessful Boolean  @default(false)
+  attemptedAt   DateTime @default(now())
+
+  // Relations
+  job      Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id])
+}
+
+// ── Reviews ─────────────────────────────────────────────────────────
+model Review {
+  id         String   @id @default(cuid())
+  jobId      String   @unique
+  authorId   String
+  providerId String
+  rating     Int      // 1-5
+  comment    String?
+  photoUrl   String?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  job      Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  author   User     @relation("ReviewAuthor", fields: [authorId], references: [id])
+  provider Provider @relation("ReviewSubject", fields: [providerId], references: [id])
+}
+
+// ── Tips ─────────────────────────────────────────────────────────────
+model Tip {
+  id                String   @id @default(cuid())
+  jobId             String   @unique
+  customerId        String
+  providerId        String
+  amount            Float    // Tip amount in dollars
+  stripePaymentId   String?  // Stripe PaymentIntent ID (wired, not active yet)
+  status            String   @default("pending") // pending | processing | completed | failed
+  createdAt         DateTime @default(now())
+
+  // Relations
+  job      Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  customer User     @relation("TipGiver", fields: [customerId], references: [id])
+  provider Provider @relation("TipReceiver", fields: [providerId], references: [id])
+}
+
+// ── Yard Vision Scans ───────────────────────────────────────────────
+model YardScan {
+  id              String   @id @default(cuid())
+  jobId           String?
+  imageUrl        String   // Path to uploaded image
+  provider        String   @default("local") // "local" | "cloud"
+  modelUsed       String?  // e.g. "llava:13b" or "claude-sonnet-4-20250514"
+  conditionScore  Float?   // 1-10 condition rating
+  estimatedEffort String?  // "low" | "medium" | "high" | "extreme"
+  findings        String?  // JSON string of detected issues
+  rawResponse     String?  // Full AI response for debugging
+  processingMs    Int?     // How long the scan took
+  createdAt       DateTime @default(now())
+}

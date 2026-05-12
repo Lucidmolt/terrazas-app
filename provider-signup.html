@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Terrazas | Provider Onboarding</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(24px); }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col items-center justify-center p-6">
+
+    <div class="w-full max-w-md space-y-8 animate-in fade-in zoom-in-95 duration-700">
+        <!-- Header -->
+        <div class="text-center space-y-2">
+            <h1 class="text-4xl font-black tracking-tighter text-emerald-700">TERRAZAS</h1>
+            <h2 class="text-xl font-bold text-slate-800">Become a Provider</h2>
+            <p class="text-sm text-slate-500 font-medium">Verify your business and start claiming jobs.</p>
+        </div>
+
+        <!-- Form -->
+        <div class="glass p-8 rounded-[2.5rem] shadow-2xl border border-white space-y-6">
+            
+            <!-- Google Places Search -->
+            <div class="space-y-2">
+                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Search Business (Google Maps)</label>
+                <div class="relative">
+                    <input type="text" id="business-search" placeholder="Business Name or Address" 
+                        class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 font-bold placeholder:text-slate-300 focus:border-emerald-500 focus:outline-none transition-all">
+                </div>
+                <p class="text-[10px] text-slate-400 font-medium ml-4">Select your business to auto-verify your rating.</p>
+            </div>
+
+            <!-- Manually Extracted Data (Pre-filled after selection) -->
+            <div id="business-details" class="hidden space-y-4 pt-4 border-t border-slate-100">
+                <div class="flex items-center space-x-4 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+                    <div id="place-rating-emoji" class="text-2xl">⭐</div>
+                    <div>
+                        <div id="place-name" class="font-black text-slate-900">Lone Star Mowers</div>
+                        <div id="place-rating-text" class="text-xs font-bold text-emerald-700 uppercase tracking-widest">4.8 Rating • Verified</div>
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Phone Number (for SMS Alerts)</label>
+                    <input type="tel" id="provider-phone" placeholder="+1 (555) 000-0000" 
+                        class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 font-bold focus:border-emerald-500 focus:outline-none transition-all">
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Service Zip Codes</label>
+                    <input type="text" id="provider-zips" placeholder="76262, 75201, 76051" 
+                        class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 font-bold focus:border-emerald-500 focus:outline-none transition-all">
+                </div>
+
+                <button onclick="submitProvider()" class="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all">
+                    COMPLETE SETUP ⚡️
+                </button>
+            </div>
+        </div>
+
+        <button onclick="window.location.href='/'" class="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest">Back to Customer App</button>
+    </div>
+
+    <!-- Google Maps JS API (Requires API Key) -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&libraries=places"></script>
+    
+    <script>
+        // Placeholder for Google Places Integration
+        function initAutocomplete() {
+            const input = document.getElementById('business-search');
+            const autocomplete = new google.maps.places.Autocomplete(input);
+            
+            autocomplete.addListener('place_changed', function() {
+                const place = autocomplete.getPlace();
+                if (!place.place_id) return;
+
+                // Pre-fill UI
+                document.getElementById('place-name').innerText = place.name;
+                document.getElementById('place-rating-text').innerText = (place.rating || 'N/A') + ' Rating • Verified';
+                document.getElementById('business-details').classList.remove('hidden');
+                
+                // Store place_id for backend verification
+                window.selectedPlaceId = place.place_id;
+            });
+        }
+
+        google.maps.event.addDomListener(window, 'load', initAutocomplete);
+
+        async function submitProvider() {
+            const phone = document.getElementById('provider-phone').value;
+            const zips = document.getElementById('provider-zips').value.split(',').map(z => z.trim());
+            
+            alert(`Setup Initiated!\n\n- Business: ${document.getElementById('place-name').innerText}\n- Phone: ${phone}\n- Zones: ${zips.join(', ')}\n\nNext step: Stripe Connect Onboarding.`);
+        }
+    </script>
+
+</body>
+</html>

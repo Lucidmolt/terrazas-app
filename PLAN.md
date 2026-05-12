@@ -1,33 +1,31 @@
-# Terrazas.app Production Wiring Plan
+# Terrazas.app - Execution Plan (V3)
 
-## 1. Domain & Infrastructure
-- [ ] **Cloudflare CNAME**: Point `terrazas.app` to `cname.vercel-dns.com`.
-- [ ] **Vercel Domains**: Add `terrazas.app` to the project in the Vercel dashboard.
-- [ ] **SSL Verification**: Ensure Cloudflare proxy (Orange Cloud) is handled (Full/Strict SSL).
+## 💠 Phase 1: Core Logistics & Premium UI (ACTIVE)
+- [x] **Code Segregation**: Logic moved to `terrazas/js/app.js`.
+- [x] **Enhanced Glassmorphism**: High-blur backdrops and layered UI.
+- [x] **Provider Seeding**: Injected "Green Leaf Pro" (TX) and "West Coast Greens" (CA) into Supabase.
+- [x] **Database Readiness**: `is_active` toggle added and filtered in queries.
+- [x] **Broadcast Engine**: Implement 15-minute "Claim" window logic and real-time UI countdown.
+- [x] **Notification Loop**: Edge Function configured to alert all active pros in the zip code.
 
-## 2. Supabase Backend (Real-Time State)
-- [ ] **Project Setup**: Create/Link Supabase project.
-- [ ] **Schema Design**:
-    - `profiles`: User/Provider metadata.
-    - `jobs`: Status, Zip, Client ID, Provider ID, Tier, Price.
-    - `providers`: Business info, Rating, Area coverage.
-- [ ] **Client SDK**: Integrate `@supabase/supabase-js` into `index.html`.
-- [ ] **Real-time**: Enable replication for `jobs` so the client UI updates when a job is claimed.
+## 💠 Phase 2: Functional Verification (STAGING)
+- [ ] **Yard Vision™ Pricing Guard**: Use Gemini 2.0 Flash to analyze the user-uploaded yard photo.
+    - *Detection*: Identify excessive debris, high grass (>12 inches), or pet waste.
+    - *Automated Upcharge*: If "High Growth" or "Debris" is detected, trigger a UI alert: "Condition Detected: +$15 Debris/Growth Fee."
+    - *Provider Transparency*: If a user proceeds with a 'Basic' tier despite a 'Severe' scan advice, the broadcast to providers includes a **"Condition Warning: Under-Tired Job"** badge. This allows Pros to make an informed decision on whether to claim it based on the extra effort required.
+- [ ] **Smart Route Optimization**: Group jobs by zip code and traffic patterns to maximize provider revenue.
+- [ ] **Auto-Billing & Instant Payout**: Stripe Connect integration for fund release upon "Before/After" photo approval.
 
-## 3. Stripe Connect (Payments)
-- [ ] **Account Setup**: Configure Stripe Connect for Marketplace (Standard or Express).
-- [ ] **Payment Flow**:
-    - Frontend creates PaymentIntent.
-    - Webhook updates Supabase job status to `paid`.
-- [ ] **Payouts**: Automation for splitting fees and paying providers upon job completion.
+## 💠 Phase 3: Verification & Compliance
+- [ ] **Texas/California License Check**:
+    - Texas: Irrigation (TECQ) and Pesticide (TDA) verification.
+    - California: C-27 Landscaping Contractor License (CSLB) verification.
+- [ ] **Certificate of Insurance (COI) OCR**: Automated OCR to verify "Additionally Insured" status.
+- [ ] **Background Checks**: Integration with Sterling or Checkr for provider vetting.
 
-## 4. Provider Dispatch (Telegram Bot)
-- [ ] **Bot Registration**: Create `@TerrazasProviderBot` via BotFather.
-- [ ] **Logic Engine**:
-    - Listen to Supabase `jobs` inserts (Broadcast).
-    - Push alerts to Telegram with "Claim" button.
-    - On claim: Update Supabase `provider_id` and notify Client.
+## 💠 Phase 4: Scaling & Growth
+- [ ] **Referral Loop**: Discounted first cut for both referrer and new user.
+- [ ] **Subscription Model**: Weekly/Bi-weekly "Set and Forget" maintenance.
 
-## 5. Security & PWA
-- [ ] **Auth**: Supabase OTP (One-Time Password) for frictionless login.
-- [ ] **PWA Manifest**: Finalize `manifest.json` and service worker for "Add to Home Screen".
+---
+*Last Updated: 2026-05-09 22:15 CDT*

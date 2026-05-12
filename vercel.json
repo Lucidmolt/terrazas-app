@@ -1,9 +1,5 @@
 {
   "version": 2,
   "name": "terrazas-app",
-  "framework": null,
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "framework": "nextjs"
 }
