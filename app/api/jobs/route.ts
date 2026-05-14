@@ -12,9 +12,27 @@ export async function GET(request: Request) {
   const customerId = searchParams.get('customerId');
 
   try {
+    // ── Inline auto-approve: resolve expired 10-min veto deadlines ──
+    const expired = await db.job.findMany({
+      where: {
+        status: 'pending_approval',
+        approvalDeadline: { lte: new Date() },
+      },
+    });
+    if (expired.length > 0) {
+      await db.job.updateMany({
+        where: { id: { in: expired.map(j => j.id) } },
+        data: { status: 'active', autoApproved: true, approvedAt: new Date() },
+      });
+    }
+
     const where: any = {};
 
-    if (status) where.status = status;
+    // Support comma-separated statuses: ?status=active,en_route
+    if (status) {
+      const statuses = status.split(',').map(s => s.trim());
+      where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
+    }
     if (zip) where.zipCode = zip;
     if (customerId) where.customerId = customerId;
 
