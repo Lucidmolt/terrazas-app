@@ -6,6 +6,14 @@
     {
       "path": "/api/cron/auto-approve",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-payout",
+      "schedule": "0 22 * * 5"
+    },
+    {
+      "path": "/api/cron/clear-holds",
+      "schedule": "0 6 * * *"
     }
   ]
 }
