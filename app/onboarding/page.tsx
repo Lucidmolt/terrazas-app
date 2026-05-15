@@ -24,6 +24,7 @@ function OnboardingContent() {
     logoUrl: '', portfolioPhotos: [] as string[], yearsInBusiness: '',
     teamSize: '', equipmentType: '', googlePlaceId: '',
     website: '', googleRating: 0, googleReviewCount: 0,
+    equipmentPhotoUrl: '',
   });
   const [tosAccepted, setTosAccepted] = useState(false);
 
@@ -84,7 +85,7 @@ function OnboardingContent() {
           businessName: form.businessName, selectedServices: form.selectedServices,
           zipCodes: form.zipCodes, bio: form.bio, logoUrl: form.logoUrl,
           portfolioPhotos: form.portfolioPhotos, yearsInBusiness: form.yearsInBusiness ? parseInt(form.yearsInBusiness) : undefined,
-          teamSize: form.teamSize, equipmentType: form.equipmentType,
+          teamSize: form.teamSize, equipmentType: form.equipmentType, equipmentPhotoUrl: form.equipmentPhotoUrl,
           googlePlaceId: form.googlePlaceId, tosAccepted: true,
         }),
       });
@@ -255,6 +256,25 @@ function OnboardingContent() {
                     <option value="medium">5+ people</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Equipment Photo — Community Pro requirement */}
+              <div style={{ marginTop: 16 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>🔧 Equipment Photo</label>
+                <p style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>Upload a photo of your mowing equipment. This helps us match you with the right jobs.</p>
+                {form.equipmentPhotoUrl ? (
+                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <img src={form.equipmentPhotoUrl} alt="Equipment" style={{ width: '100%', maxWidth: 280, height: 160, objectFit: 'cover', borderRadius: 12, border: '2px solid #059669' }} />
+                    <button onClick={() => set('equipmentPhotoUrl', '')} style={{ position: 'absolute', top: 6, right: 6, width: 24, height: 24, borderRadius: 12, border: 'none', background: '#ef4444', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>×</button>
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#059669', fontWeight: 600 }}>✅ Equipment photo uploaded</div>
+                  </div>
+                ) : (
+                  <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 120, borderRadius: 12, border: '2px dashed #d1d5db', cursor: 'pointer', color: '#94a3b8', fontSize: 13, gap: 8, transition: 'all 0.2s' }}>
+                    <span style={{ fontSize: 32 }}>📸</span>
+                    <span>Tap to upload equipment photo</span>
+                    <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={async e => { if (e.target.files?.[0]) { const url = await uploadFile(e.target.files[0], 'equipment'); if (url) set('equipmentPhotoUrl', url); } }} />
+                  </label>
+                )}
               </div>
             </div>
             {/* Portfolio */}
