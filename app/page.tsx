@@ -44,42 +44,28 @@ export default function HomePage() {
           const { latitude, longitude } = pos.coords;
           setMapCenter({ lat: latitude, lng: longitude });
 
-          // Reverse geocode to get zip code
-          const geoKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY;
-          if (geoKey) {
-            try {
-              const res = await fetch(
-                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${geoKey}`
-              );
-              const data = await res.json();
-              if (data.results?.length) {
-                // Find the postal_code component
-                for (const result of data.results) {
-                  const zipComponent = result.address_components?.find(
-                    (c: any) => c.types?.includes('postal_code')
-                  );
-                  if (zipComponent) {
-                    setZip(zipComponent.short_name);
-                    // Auto-trigger provider check after a small delay for UI to update
-                    setTimeout(async () => {
-                      try {
-                        const pRes = await fetch(`/api/providers?zip=${zipComponent.short_name}`);
-                        const pData = await pRes.json();
-                        setActiveZip(zipComponent.short_name);
-                        setProviders(pData.providers || []);
-                        setProviderCount(pData.count || 0);
-                        setView('provider-choice');
-                        setMapScale(1.2);
-                        setPinVisible(true);
-                        setMapZoom(15);
-                      } catch {}
-                    }, 300);
-                    break;
-                  }
-                }
-              }
-            } catch {} // Silently fail — user can still type manually
-          }
+          // Reverse geocode via server-side API (keeps key off the browser)
+          try {
+            const res = await fetch(`/api/geo/reverse?lat=${latitude}&lng=${longitude}`);
+            const data = await res.json();
+            if (data.zip) {
+              setZip(data.zip);
+              // Auto-trigger provider check
+              setTimeout(async () => {
+                try {
+                  const pRes = await fetch(`/api/providers?zip=${data.zip}`);
+                  const pData = await pRes.json();
+                  setActiveZip(data.zip);
+                  setProviders(pData.providers || []);
+                  setProviderCount(pData.count || 0);
+                  setView('provider-choice');
+                  setMapScale(1.2);
+                  setPinVisible(true);
+                  setMapZoom(15);
+                } catch {}
+              }, 300);
+            }
+          } catch {} // Silent fail — user can still type manually
         },
         () => {}, // Denied or error — keep Liberal, KS default
         { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
