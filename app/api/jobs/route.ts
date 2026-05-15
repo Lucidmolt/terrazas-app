@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { geocodeAddress } from '@/lib/google-maps';
 import { calculateDynamicPrice } from '@/lib/pricing';
 import { broadcastJobToProviders } from '@/lib/notifications';
+import { maskJobsForViewer } from '@/lib/context-envelope';
 
 // GET /api/jobs — list jobs (broadcast for pros, own for customers)
 export async function GET(request: Request) {
@@ -10,6 +11,8 @@ export async function GET(request: Request) {
   const status = searchParams.get('status');
   const zip = searchParams.get('zip');
   const customerId = searchParams.get('customerId');
+  const viewerId = searchParams.get('viewerId');
+  const viewerRole = searchParams.get('viewerRole') || 'customer';
 
   try {
     // ── Inline auto-approve: resolve expired 10-min veto deadlines ──
@@ -24,6 +27,44 @@ export async function GET(request: Request) {
         where: { id: { in: expired.map(j => j.id) } },
         data: { status: 'active', autoApproved: true, approvedAt: new Date() },
       });
+    }
+
+    // ── Master Parachute: T+60 unclaimed job escalation ──
+    const sixtyMinsAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const staleJobs = await db.job.findMany({
+      where: {
+        status: 'broadcast',
+        broadcastedAt: { lte: sixtyMinsAgo },
+        surgeLevel: { not: 'parachute' }, // Don't re-trigger
+      },
+    });
+    if (staleJobs.length > 0) {
+      for (const staleJob of staleJobs) {
+        // Boost provider payout by 5%
+        const boostedPayout = Math.round(staleJob.providerPayout * 1.05 * 100) / 100;
+        await db.job.update({
+          where: { id: staleJob.id },
+          data: {
+            providerPayout: boostedPayout,
+            surgeLevel: 'parachute',
+          },
+        });
+
+        // Create admin notification
+        await db.notification.create({
+          data: {
+            userId: staleJob.customerId, // Will also be visible in admin panel
+            jobId: staleJob.id,
+            type: 'system',
+            channel: 'in_app',
+            title: '⚠️ Job unclaimed for 60+ minutes',
+            body: `Job in ${staleJob.zipCode} ($${staleJob.price}) has no provider. Payout boosted to $${boostedPayout}. Consider manual dispatch.`,
+            isSent: true,
+            sentAt: new Date(),
+          },
+        });
+      }
+      console.log(`[Parachute] Boosted ${staleJobs.length} stale jobs`);
     }
 
     const where: any = {};
@@ -46,7 +87,11 @@ export async function GET(request: Request) {
       take: 50,
     });
 
-    return NextResponse.json({ jobs });
+    // ── System 3: Apply Sovereign Context Envelope ──
+    // Mask sensitive data based on who's viewing
+    const maskedJobs = maskJobsForViewer(jobs, viewerId, viewerRole);
+
+    return NextResponse.json({ jobs: maskedJobs });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
