@@ -36,6 +36,7 @@ model User {
   onboardedAt    DateTime? // When they completed onboarding
   tosAcceptedAt  DateTime? // When they accepted Terms of Service
   tosVersion     String?   // Which TOS version they accepted
+  economyAckedAt DateTime? // One-time Community Pro tier acknowledgment
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

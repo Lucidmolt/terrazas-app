@@ -285,6 +285,52 @@ function CustomerTerms() {
           on the Platform</strong>.
         </p>
       </Section>
+
+      <Section title="7A. Service Tiers &amp; Community Providers">
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <p style={{ fontWeight: 700, color: '#92400e', marginBottom: 8 }}>📋 SERVICE TIER DISCLOSURE</p>
+          <p>
+            Terrazas offers two tiers of service providers. By using the Platform, you acknowledge and accept 
+            the following distinctions:
+          </p>
+        </div>
+
+        <p><strong>Verified Pros (Premium Rate):</strong></p>
+        <ul style={{ paddingLeft: 20 }}>
+          <li>Carry verified General Liability Insurance and applicable business licenses</li>
+          <li>Are eligible for all job types, including complex, high-value, and AI-flagged properties</li>
+          <li>Are indicated by a &quot;Verified&quot; badge on their profile</li>
+        </ul>
+
+        <p><strong>Community Pros (Economy Rate):</strong></p>
+        <ul style={{ paddingLeft: 20 }}>
+          <li>Are identity-verified individuals who have completed Terrazas onboarding, including ID verification, 
+            phone verification, and Stripe payment setup</li>
+          <li><strong>Community Pros are not required to carry General Liability Insurance</strong></li>
+          <li>Are restricted to standard mowing jobs on small, flat residential properties (under 0.25 acres)</li>
+          <li>Are subject to a maximum job price cap and limited number of active jobs</li>
+          <li>A portion of their initial payouts is held in a Platform Protection Fund to cover minor incidental damages</li>
+        </ul>
+
+        <p>
+          <strong>BY SELECTING THE &quot;ECONOMY&quot; RATE OPTION OR ACCEPTING A CLAIM FROM A COMMUNITY PRO, 
+          YOU ACKNOWLEDGE THAT:</strong>
+        </p>
+        <ul style={{ paddingLeft: 20 }}>
+          <li>The service is provided by an individual who may not carry commercial insurance</li>
+          <li>Terrazas&apos;s Platform Protection Fund provides limited coverage for minor incidental damages only 
+            and is not a substitute for the provider&apos;s own insurance</li>
+          <li>You assume additional risk compared to services performed by a Verified Pro</li>
+          <li>Terrazas shall not be liable for any damages, losses, or injuries arising from services 
+            performed by Community Pros beyond the Platform Protection Fund balance, if applicable</li>
+        </ul>
+
+        <p>
+          When you select the Economy rate for the first time, you will be asked to confirm your understanding of 
+          Community Pro terms. This is a one-time acknowledgment. Subsequent Economy bookings will display a brief 
+          service tier notice but will not require re-confirmation.
+        </p>
+      </Section>
     </>
   );
 }
@@ -321,6 +367,49 @@ function ProviderTerms() {
         <p>
           <strong>Falsifying profile information, reviews, or qualifications is grounds for immediate account 
           termination.</strong>
+        </p>
+      </Section>
+
+      <Section title="5A. Provider Tiers &amp; Community Pro Program">
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <p style={{ fontWeight: 700, color: '#1e40af', marginBottom: 8 }}>🏷️ TWO-TIER PROVIDER SYSTEM</p>
+          <p>
+            Terrazas operates a two-tier provider system. Your tier determines which jobs are visible to you 
+            and what restrictions apply.
+          </p>
+        </div>
+
+        <p><strong>Tier 0 — Community Pro:</strong></p>
+        <ul style={{ paddingLeft: 20 }}>
+          <li>Requirements: Identity verification, verified phone number, and active Stripe Connect account</li>
+          <li>General Liability Insurance is <strong>not required</strong> but recommended</li>
+          <li>Restricted to standard mowing jobs on flat properties under 0.25 acres</li>
+          <li>Maximum job price: $50</li>
+          <li>Maximum concurrent active jobs: 2</li>
+          <li>Equipment photo required during onboarding (used for job-matching)</li>
+        </ul>
+
+        <p><strong>Tier 1 — Verified Pro:</strong></p>
+        <ul style={{ paddingLeft: 20 }}>
+          <li>Requirements: Verified General Liability Insurance and applicable business license</li>
+          <li>No restrictions on job type, price, lot size, or terrain</li>
+          <li>Unlimited concurrent active jobs</li>
+          <li>&quot;Verified&quot; badge displayed on your profile</li>
+        </ul>
+
+        <p><strong>Platform Protection Fund (Escrow Hold):</strong></p>
+        <p>
+          For Community Pros, a small percentage (currently 5%) of your first 10 payouts will be held in escrow 
+          as a Platform Protection Fund. This fund covers minor incidental property damages that may occur during 
+          service. After completing 10 jobs with no claims, held funds will be released to your payout balance. 
+          By accepting these Terms, you consent to this withholding.
+        </p>
+
+        <p><strong>Upgrade Path:</strong></p>
+        <p>
+          Community Pros who complete 20 or more jobs with a cumulative rating of 4.8 stars or higher will be 
+          invited to upgrade to Verified Pro status. Upgrade benefits may include discounted General Liability 
+          insurance referrals and reduced platform commission rates.
         </p>
       </Section>
 
