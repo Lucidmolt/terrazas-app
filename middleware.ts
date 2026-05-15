@@ -7,7 +7,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Public routes — no auth needed
-  const publicPaths = ['/', '/login', '/terms', '/onboarding', '/auth', '/api/webhooks', '/api/cron', '/api/pricing', '/api/coverage', '/api/business'];
+  const publicPaths = ['/', '/login', '/terms', '/onboarding', '/auth', '/api/webhooks', '/api/cron', '/api/pricing', '/api/coverage', '/api/business', '/api/providers', '/api/jobs', '/api/geo', '/api/auth', '/api/upload'];
   if (publicPaths.some(p => pathname.startsWith(p))) return res;
 
   // Static assets

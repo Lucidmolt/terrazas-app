@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 
@@ -11,14 +11,17 @@ function LoginContent() {
 
   const [role, setRole] = useState<'customer' | 'pro'>(defaultRole === 'pro' ? 'pro' : 'customer');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const supabase = createClient();
 
-  const handleCustomerLogin = async () => {
+  // ── Send OTP Code ────────────────────────────────────────────────
+  const sendOtp = async () => {
     if (!email) return;
     setLoading(true);
     setError('');
@@ -26,8 +29,8 @@ function LoginContent() {
     const { error: authError } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/confirm`,
-        data: { role: 'customer' },
+        shouldCreateUser: true,
+        data: { role },
       },
     });
 
@@ -37,62 +40,98 @@ function LoginContent() {
       return;
     }
 
-    setMessage('✅ Magic link sent! Check your email and click the link to sign in.');
+    setOtpSent(true);
+    setMessage('');
     setLoading(false);
+    // Focus first OTP input
+    setTimeout(() => inputRefs.current[0]?.focus(), 100);
   };
 
-  const handleProLogin = async () => {
-    if (!phone) return;
+  // ── Handle OTP Input ─────────────────────────────────────────────
+  const handleOtpChange = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return; // Only allow digits
+
+    const newOtp = [...otp];
+    newOtp[index] = value.slice(-1); // Only take last digit
+    setOtp(newOtp);
+
+    // Auto-advance to next input
+    if (value && index < 5) {
+      inputRefs.current[index + 1]?.focus();
+    }
+
+    // Auto-submit when all 6 digits are entered
+    if (newOtp.every(d => d !== '') && newOtp.join('').length === 6) {
+      verifyOtp(newOtp.join(''));
+    }
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !otp[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  // ── Handle Paste ─────────────────────────────────────────────────
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (pasted.length === 6) {
+      const newOtp = pasted.split('');
+      setOtp(newOtp);
+      inputRefs.current[5]?.focus();
+      verifyOtp(pasted);
+    }
+  };
+
+  // ── Verify OTP Code ──────────────────────────────────────────────
+  const verifyOtp = async (code: string) => {
     setLoading(true);
     setError('');
 
-    // Format phone to E.164
-    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone.replace(/\D/g, '')}`;
-
-    const { error: authError } = await supabase.auth.signInWithOtp({
-      phone: formattedPhone,
-      options: {
-        data: { role: 'pro' },
-      },
+    const { data, error: verifyError } = await supabase.auth.verifyOtp({
+      email,
+      token: code,
+      type: 'email',
     });
 
-    if (authError) {
-      // If SMS isn't configured, fall back to email-based pro login
-      if (authError.message.includes('not enabled') || authError.message.includes('provider')) {
-        setError('SMS login not yet available. Please use email login for now.');
-        setLoading(false);
-        return;
+    if (verifyError) {
+      setError(verifyError.message);
+      setOtp(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
+      setLoading(false);
+      return;
+    }
+
+    if (data.session) {
+      // Sync user to Prisma database
+      try {
+        await fetch('/api/auth/callback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: 'SIGNED_IN', session: data.session }),
+        });
+      } catch {
+        // Non-fatal
       }
-      setError(authError.message);
-      setLoading(false);
-      return;
-    }
 
-    setMessage('✅ Verification code sent! Enter the 6-digit code below.');
-    setLoading(false);
+      setMessage('✅ Verified! Redirecting...');
+      setTimeout(() => {
+        router.push(role === 'pro' ? '/pro' : '/');
+      }, 1000);
+    } else {
+      setError('Verification failed. Please try again.');
+      setOtp(['', '', '', '', '', '']);
+      setLoading(false);
+    }
   };
 
-  const handleEmailProLogin = async () => {
-    if (!email) return;
-    setLoading(true);
+  // ── Resend Code ──────────────────────────────────────────────────
+  const resendCode = async () => {
+    setOtp(['', '', '', '', '', '']);
     setError('');
-
-    const { error: authError } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/confirm?role=pro`,
-        data: { role: 'pro' },
-      },
-    });
-
-    if (authError) {
-      setError(authError.message);
-      setLoading(false);
-      return;
-    }
-
-    setMessage('✅ Magic link sent! Check your email and click the link to sign in.');
-    setLoading(false);
+    await sendOtp();
+    setMessage('✅ New code sent!');
   };
 
   return (
@@ -107,58 +146,97 @@ function LoginContent() {
 
         {/* Role Toggle */}
         <div className="flex bg-white rounded-4xl p-1 border border-slate-100 shadow-sm">
-          <button onClick={() => { setRole('customer'); setMessage(''); setError(''); }}
+          <button onClick={() => { setRole('customer'); setMessage(''); setError(''); setOtpSent(false); setOtp(['','','','','','']); }}
             className={`flex-1 py-3 rounded-[1.8rem] text-sm font-bold transition-all ${role === 'customer' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
             Customer
           </button>
-          <button onClick={() => { setRole('pro'); setMessage(''); setError(''); }}
+          <button onClick={() => { setRole('pro'); setMessage(''); setError(''); setOtpSent(false); setOtp(['','','','','','']); }}
             className={`flex-1 py-3 rounded-[1.8rem] text-sm font-bold transition-all ${role === 'pro' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
             Pro / Provider
           </button>
         </div>
 
         <div className="glass rounded-5xl p-8 shadow-2xl border border-white space-y-6">
-          {role === 'customer' ? (
+          {!otpSent ? (
             <>
+              {/* Email Input */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email</label>
                 <input
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder={role === 'customer' ? 'you@example.com' : 'pro@business.com'}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCustomerLogin()}
-                  className="w-full px-5 py-4 rounded-3xl bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+                  onKeyDown={(e) => e.key === 'Enter' && sendOtp()}
+                  className={`w-full px-5 py-4 rounded-3xl bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
+                    role === 'customer' ? 'focus:ring-brand-500' : 'focus:ring-emerald-500'
+                  }`}
                 />
-                <p className="text-[10px] text-slate-400 font-medium ml-4">We&apos;ll send a magic link — no password needed.</p>
+                <p className="text-[10px] text-slate-400 font-medium ml-4">We&apos;ll send a 6-digit verification code to your email.</p>
               </div>
               <button
-                onClick={handleCustomerLogin}
+                onClick={sendOtp}
                 disabled={loading || !email}
-                className="w-full py-4 rounded-3xl bg-brand-600 text-white font-bold text-base shadow-lg hover:shadow-xl hover:bg-brand-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
-                {loading ? '⏳ Sending...' : '✨ Send Magic Link'}
+                className={`w-full py-4 rounded-3xl text-white font-bold text-base shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] ${
+                  role === 'customer'
+                    ? 'bg-brand-600 hover:bg-brand-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}>
+                {loading ? '⏳ Sending...' : '🔐 Send Verification Code'}
               </button>
             </>
           ) : (
             <>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email</label>
-                <input
-                  type="email"
-                  placeholder="pro@business.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleEmailProLogin()}
-                  className="w-full px-5 py-4 rounded-3xl bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                />
-                <p className="text-[10px] text-slate-400 font-medium ml-4">Sign in with your registered email address.</p>
+              {/* OTP Input */}
+              <div className="space-y-4">
+                <div className="text-center">
+                  <p className="text-sm font-bold text-slate-700">Enter the 6-digit code sent to</p>
+                  <p className="text-sm text-slate-500 font-medium">{email}</p>
+                </div>
+
+                <div className="flex justify-center gap-2" onPaste={handleOtpPaste}>
+                  {otp.map((digit, i) => (
+                    <input
+                      key={i}
+                      ref={(el) => { inputRefs.current[i] = el; }}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(i, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                      className={`w-12 h-14 text-center text-2xl font-black rounded-2xl border-2 bg-white transition-all focus:outline-none ${
+                        digit
+                          ? role === 'customer' ? 'border-brand-500 text-brand-700' : 'border-emerald-500 text-emerald-700'
+                          : 'border-slate-200 text-slate-900'
+                      } ${role === 'customer' ? 'focus:border-brand-500 focus:ring-2 focus:ring-brand-200' : 'focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200'}`}
+                      disabled={loading}
+                    />
+                  ))}
+                </div>
+
+                <div className="text-center space-y-2">
+                  <button
+                    onClick={resendCode}
+                    disabled={loading}
+                    className="text-xs text-slate-400 hover:text-slate-600 font-medium transition-colors">
+                    Didn&apos;t get it? <span className="font-bold underline">Resend code</span>
+                  </button>
+                  <br />
+                  <button
+                    onClick={() => { setOtpSent(false); setOtp(['','','','','','']); setError(''); }}
+                    className="text-xs text-slate-400 hover:text-slate-600 font-medium transition-colors">
+                    ← Use a different email
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={handleEmailProLogin}
-                disabled={loading || !email}
-                className="w-full py-4 rounded-3xl bg-emerald-600 text-white font-bold text-base shadow-lg hover:shadow-xl hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
-                {loading ? '⏳ Sending...' : '🔐 Send Pro Login Link'}
-              </button>
+
+              {loading && (
+                <div className="text-center">
+                  <div className="text-2xl animate-spin inline-block">⏳</div>
+                  <p className="text-sm text-slate-500 mt-2">Verifying...</p>
+                </div>
+              )}
             </>
           )}
 
@@ -175,20 +253,22 @@ function LoginContent() {
           )}
 
           {/* Sign up link */}
-          <div className="text-center pt-2">
-            <p className="text-xs text-slate-400">
-              {role === 'customer' ? (
-                <>New here? Just enter your email — we&apos;ll create your account automatically.</>
-              ) : (
-                <>Want to join as a provider? <a href="/onboarding?role=pro" className="text-emerald-600 font-bold hover:underline">Apply here →</a></>
-              )}
-            </p>
-          </div>
+          {!otpSent && (
+            <div className="text-center pt-2">
+              <p className="text-xs text-slate-400">
+                {role === 'customer' ? (
+                  <>New here? Just enter your email — we&apos;ll create your account automatically.</>
+                ) : (
+                  <>Want to join as a provider? <a href="/onboarding?role=pro" className="text-emerald-600 font-bold hover:underline">Apply here →</a></>
+                )}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <p className="text-center text-[10px] text-slate-400">
-          By signing in you agree to our Terms of Service and Privacy Policy.
+          By signing in you agree to our <a href="/terms" className="underline">Terms of Service</a> and Privacy Policy.
         </p>
       </div>
     </div>

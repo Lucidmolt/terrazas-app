@@ -1,14 +1,34 @@
 import { NextResponse } from 'next/server';
 import { getPayoutSummary, requestInstantPayout } from '@/lib/payouts';
+import { getAuthUser } from '@/lib/supabase-server';
+import { db } from '@/lib/db';
+
+// Helper: Get provider ID from auth session
+async function getProviderFromAuth(): Promise<string | null> {
+  const authUser = await getAuthUser();
+  if (!authUser?.email) return null;
+
+  const provider = await db.provider.findFirst({
+    where: { email: authUser.email, isActive: true },
+    select: { id: true },
+  });
+
+  return provider?.id || null;
+}
 
 // GET /api/provider/payout — Get payout summary for dashboard
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const providerId = searchParams.get('providerId');
+  let providerId = searchParams.get('providerId');
 
-  // TODO: In production, get providerId from auth session
+  // Try auth session first, fall back to query param for dev
+  const authProviderId = await getProviderFromAuth();
+  if (authProviderId) {
+    providerId = authProviderId;
+  }
+
   if (!providerId) {
-    return NextResponse.json({ error: 'providerId required' }, { status: 400 });
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
   try {
@@ -22,10 +42,14 @@ export async function GET(request: Request) {
 // POST /api/provider/payout — Request instant payout
 export async function POST(request: Request) {
   try {
-    const { providerId, action } = await request.json();
+    const { providerId: bodyProviderId, action } = await request.json();
+
+    // Try auth session first, fall back to body param for dev
+    const authProviderId = await getProviderFromAuth();
+    const providerId = authProviderId || bodyProviderId;
 
     if (!providerId) {
-      return NextResponse.json({ error: 'providerId required' }, { status: 400 });
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
     if (action === 'instant') {
@@ -36,6 +60,22 @@ export async function POST(request: Request) {
           error: result.error,
           success: false,
         }, { status: 400 });
+      }
+
+      // Send payout email notification
+      try {
+        const provider = await db.provider.findUnique({ where: { id: providerId } });
+        if (provider?.email) {
+          const { sendPayoutEmail } = await import('@/lib/email');
+          await sendPayoutEmail(
+            provider.email,
+            result.netPayout.toFixed(2),
+            'instant',
+            result.fee.toFixed(2)
+          );
+        }
+      } catch {
+        // Non-fatal
       }
 
       return NextResponse.json({
