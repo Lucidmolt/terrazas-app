@@ -155,7 +155,12 @@ model Job {
   etaMinutes       Int?
   pendingProId     String?
   customerNotes    String?   // Special instructions from customer
-  surgeLevel       String?   // low | normal | busy | high | peak
+  surgeLevel       String?   // low | normal | busy | high | peak | parachute
+
+  // ── Broadcast Escalation (System 2: Time Dilation) ──
+  broadcastTier    Int       @default(1)  // 0=preferred, 1=local_zip, 2=global
+  escalatedAt      DateTime?              // When last escalation occurred
+  preferredProId   String?                // Customer's preferred provider (tier 0)
 
   // ── Veto / Approval ──
   blockedProviders String    @default("[]") // JSON array of vetoed provider IDs
@@ -295,6 +300,9 @@ model NotificationPreference {
   // Quiet hours (provider-side)
   quietStart String? // "22:00" — don't send between these
   quietEnd   String? // "07:00"
+
+  // WebPush subscription (System 4)
+  pushSubscription String? // JSON-stringified PushSubscription object
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { Resend } from 'resend';
+import { dispatchSignal } from '@/lib/dispatch';
 
 // ── Email Provider ─────────────────────────────────────────────────
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
@@ -208,6 +209,7 @@ export async function broadcastJobToProviders(jobId: string) {
 }
 
 // ── Notify Customer: Job Claimed ───────────────────────────────────
+// Uses System 4 multi-channel dispatch: Push → SMS → Email
 export async function notifyJobClaimed(jobId: string) {
   const job = await db.job.findUnique({
     where: { id: jobId },
@@ -216,36 +218,23 @@ export async function notifyJobClaimed(jobId: string) {
 
   if (!job || !job.provider) return;
 
-  const title = '✅ Your job was claimed!';
-  const body = `${job.provider.businessName} is on their way! ETA: ${job.etaMinutes || 30} minutes.`;
-
-  await createNotification({
+  // System 4: Multi-channel cascade (action priority = Push → SMS → Email)
+  await dispatchSignal({
     userId: job.customerId,
     jobId: job.id,
     type: 'job_claimed',
-    title,
-    body,
+    title: '✅ Your job was claimed!',
+    body: `${job.provider.businessName} has claimed your ${job.serviceType} job. ETA: ${job.etaMinutes || 30} minutes.\n\nYou have 10 minutes to approve or reassign.\n\nTrack your job: https://terrazas.app/dashboard`,
+    priority: 'action', // Urgent — customer needs to approve within 10 min
     metadata: {
       providerName: job.provider.businessName,
       etaMinutes: job.etaMinutes || 30,
     },
   });
-
-  // Email the customer
-  if (job.customer.email) {
-    await sendEmailNotification(
-      job.customer.email,
-      '✅ Your lawn care pro is on the way!',
-      `Hi ${job.customer.name || 'there'}!\n\n` +
-      `Great news — ${job.provider.businessName} has claimed your ${job.serviceType} job.\n` +
-      `Estimated arrival: ${job.etaMinutes || 30} minutes.\n\n` +
-      `Track your job: https://terrazas.app\n\n` +
-      `— Terrazas`
-    );
-  }
 }
 
 // ── Notify Customer: Job Completed ─────────────────────────────────
+// Uses System 4 multi-channel dispatch
 export async function notifyJobCompleted(jobId: string) {
   const job = await db.job.findUnique({
     where: { id: jobId },
@@ -254,28 +243,19 @@ export async function notifyJobCompleted(jobId: string) {
 
   if (!job || !job.provider) return;
 
-  const title = '🎉 Job complete!';
-  const body = `${job.provider.businessName} finished your ${job.serviceType}. Leave a review!`;
-
-  await createNotification({
+  // System 4: Multi-channel cascade (rich priority = Email with details)
+  await dispatchSignal({
     userId: job.customerId,
     jobId: job.id,
     type: 'job_completed',
-    title,
-    body,
+    title: '🎉 Job complete!',
+    body: `${job.provider.businessName} finished your ${job.serviceType}.\n\n💰 Total charged: $${job.customerTotal.toFixed(2)}\n\nLeave a review: https://terrazas.app/review?jobId=${job.id}`,
+    priority: 'rich', // Rich content — email with receipt details
+    metadata: {
+      providerName: job.provider.businessName,
+      customerTotal: job.customerTotal,
+    },
   });
-
-  if (job.customer.email) {
-    await sendEmailNotification(
-      job.customer.email,
-      '🎉 Your yard looks great!',
-      `Hi ${job.customer.name || 'there'}!\n\n` +
-      `${job.provider.businessName} just finished your ${job.serviceType}.\n\n` +
-      `💰 Total charged: $${job.customerTotal.toFixed(2)}\n` +
-      `Leave a review: https://terrazas.app/review?jobId=${job.id}\n\n` +
-      `— Terrazas`
-    );
-  }
 }
 
 // ── Get User Notifications ─────────────────────────────────────────

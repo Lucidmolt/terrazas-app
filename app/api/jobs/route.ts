@@ -4,6 +4,7 @@ import { geocodeAddress } from '@/lib/google-maps';
 import { calculateDynamicPrice } from '@/lib/pricing';
 import { broadcastJobToProviders } from '@/lib/notifications';
 import { maskJobsForViewer } from '@/lib/context-envelope';
+import { runEscalationCheck } from '@/lib/escalation';
 
 // GET /api/jobs — list jobs (broadcast for pros, own for customers)
 export async function GET(request: Request) {
@@ -66,6 +67,12 @@ export async function GET(request: Request) {
       }
       console.log(`[Parachute] Boosted ${staleJobs.length} stale jobs`);
     }
+
+    // ── System 2: Time Dilation Escalation ──
+    // Promote broadcast jobs up the visibility ladder based on effective age
+    runEscalationCheck().catch((err) => {
+      console.error('[Escalation] Check error:', err);
+    });
 
     const where: any = {};
 
