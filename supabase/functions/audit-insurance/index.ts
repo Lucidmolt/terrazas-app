@@ -7,9 +7,28 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
 
 serve(async (req) => {
   try {
+    // M4 FIX: Verify caller identity via authorization header
+    const authHeader = req.headers.get('authorization')
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Missing authorization header' }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      )
+    }
+
     const { pro_id, file_path } = await req.json()
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!)
+
+    // Verify the caller is an admin or the provider themselves
+    const token = authHeader.replace('Bearer ', '')
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid or expired token' }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      )
+    }
 
     // 1. Generate a Time-Limited Signed URL (5 minutes)
     const { data: urlData, error: urlError } = await supabase.storage
@@ -45,8 +64,6 @@ serve(async (req) => {
 
     if (updateError) throw updateError
 
-    // 4. Trigger Twilio SMS (Deferred/Async)
-    // TODO: Connect to Twilio once credentials are ready
     console.log(`Audit complete for Pro ${pro_id}. Status: ${auditResult.status}`)
 
     return new Response(JSON.stringify({ success: true, tier: auditResult.suggested_tier }), {

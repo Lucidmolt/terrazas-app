@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireAdmin } from '@/lib/api-auth';
 
 // GET /api/admin/providers — list all providers with user info
 export async function GET() {
+  // H3 FIX: Require admin role
+  const { error: authError } = await requireAdmin();
+  if (authError) return authError;
+
   try {
     const providers = await db.provider.findMany({
       include: { user: { select: { name: true, email: true } } },
@@ -16,6 +21,10 @@ export async function GET() {
 
 // PATCH /api/admin/providers — update provider status
 export async function PATCH(request: Request) {
+  // H3 FIX: Require admin role
+  const { error: authError } = await requireAdmin();
+  if (authError) return authError;
+
   try {
     const { providerId, profileStatus, isVerified, rejectionReason } = await request.json();
     if (!providerId || !profileStatus) {

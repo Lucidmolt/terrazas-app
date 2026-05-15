@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { isStripeConfigured } from '@/lib/stripe';
+import { requireAuth } from '@/lib/api-auth';
 
 // POST /api/tips — create a tip for a completed job
 export async function POST(request: Request) {
-  try {
-    const { jobId, customerId, providerId, amount } = await request.json();
+  // C1 FIX: Require authentication
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
 
-    if (!jobId || !customerId || !providerId || !amount) {
+  try {
+    const { jobId, providerId, amount } = await request.json();
+
+    if (!jobId || !providerId || !amount) {
       return NextResponse.json(
-        { error: 'jobId, customerId, providerId, and amount are required' },
+        { error: 'jobId, providerId, and amount are required' },
         { status: 400 }
       );
     }
@@ -21,6 +26,9 @@ export async function POST(request: Request) {
       );
     }
 
+    // Use authenticated user as the tipper
+    const customerId = dbUser!.id;
+
     // Verify the job exists and is completed
     const job = await db.job.findUnique({ where: { id: jobId } });
     if (!job) {
@@ -28,6 +36,9 @@ export async function POST(request: Request) {
     }
     if (job.status !== 'completed') {
       return NextResponse.json({ error: 'Can only tip on completed jobs' }, { status: 400 });
+    }
+    if (job.customerId !== customerId) {
+      return NextResponse.json({ error: 'Not authorized to tip on this job' }, { status: 403 });
     }
 
     // Record the tip (payment processing handled separately via Stripe when configured)
@@ -51,16 +62,24 @@ export async function POST(request: Request) {
   }
 }
 
-// GET /api/tips?providerId=xxx — list tips received by a provider
+// GET /api/tips?providerId=xxx — list tips received (requires auth)
 export async function GET(request: Request) {
+  // C1 FIX: Require authentication
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
+
   const { searchParams } = new URL(request.url);
   const providerId = searchParams.get('providerId');
-  const customerId = searchParams.get('customerId');
 
   try {
     const where: any = {};
-    if (providerId) where.providerId = providerId;
-    if (customerId) where.customerId = customerId;
+    // Scope to user's own tips unless they have a provider record
+    const provider = await db.provider.findFirst({ where: { email: dbUser!.email! } });
+    if (providerId && provider?.id === providerId) {
+      where.providerId = providerId;
+    } else {
+      where.customerId = dbUser!.id;
+    }
 
     const tips = await db.tip.findMany({
       where,

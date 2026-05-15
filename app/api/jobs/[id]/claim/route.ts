@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { notifyJobClaimed } from '@/lib/notifications';
 import { canProviderSeeJob, canAcceptMoreJobs } from '@/lib/risk-tier';
+import { requireProvider } from '@/lib/api-auth';
 
 // ── POST /api/jobs/[id]/claim — Atomic Lock Engine ──────────────────
 // Uses PostgreSQL's atomic UPDATE...WHERE to prevent race conditions.
@@ -11,14 +12,17 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // C1 FIX: Require authenticated provider
+  const { provider: authProvider, error: authError } = await requireProvider();
+  if (authError) return authError;
+
   const { id: jobId } = await params;
 
   try {
-    const { providerId, etaMinutes } = await request.json();
+    const { etaMinutes } = await request.json();
 
-    if (!providerId) {
-      return NextResponse.json({ error: 'providerId is required' }, { status: 400 });
-    }
+    // Use the authenticated provider's ID — not from request body
+    const providerId = authProvider!.id;
 
     // ── Pre-condition: Verify provider qualifications ──
     const provider = await db.provider.findUnique({
@@ -96,9 +100,6 @@ export async function POST(
     }
 
     // ── ATOMIC LOCK: Single UPDATE with WHERE status='broadcast' ──
-    // This is the core race-condition prevention. PostgreSQL guarantees
-    // that UPDATE...WHERE is atomic — if two transactions hit simultaneously,
-    // only ONE will match status='broadcast'. The loser gets count=0.
     const now = new Date();
     const approvalDeadline = new Date(now.getTime() + 10 * 60 * 1000);
 

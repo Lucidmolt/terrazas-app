@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
 import { createJobPaymentIntent, captureJobPayment, getPriceBreakdown, isStripeConfigured } from '@/lib/stripe';
+import { requireAuth } from '@/lib/api-auth';
 
 // POST /api/checkout — create payment intent for a job
 export async function POST(request: Request) {
-  try {
-    const { jobId, jobPrice, tipAmount = 0, customerEmail } = await request.json();
+  // C1 FIX: Require authentication
+  const { user, error: authError } = await requireAuth();
+  if (authError) return authError;
 
-    if (!jobId || !jobPrice || !customerEmail) {
+  try {
+    const { jobId, jobPrice, tipAmount = 0 } = await request.json();
+
+    if (!jobId || !jobPrice) {
       return NextResponse.json(
-        { error: 'Missing required fields: jobId, jobPrice, customerEmail' },
+        { error: 'Missing required fields: jobId, jobPrice' },
         { status: 400 }
       );
     }
+
+    // Use authenticated user's email
+    const customerEmail = user!.email!;
 
     const result = await createJobPaymentIntent(jobPrice, tipAmount, customerEmail, jobId);
 
@@ -24,7 +32,7 @@ export async function POST(request: Request) {
   }
 }
 
-// GET /api/checkout?jobPrice=75&tip=10 — preview price breakdown
+// GET /api/checkout?jobPrice=75&tip=10 — preview price breakdown (public, read-only)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const jobPrice = parseFloat(searchParams.get('jobPrice') || '75');

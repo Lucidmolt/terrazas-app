@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
 import { uploadImage, UploadFolder } from '@/lib/storage';
+import { requireAuth } from '@/lib/api-auth';
 
 // POST /api/upload — Upload image to Supabase Storage
 // Body: FormData with 'file' field and 'folder' field
 export async function POST(request: Request) {
+  // H5 FIX: Require authentication for uploads
+  const { error: authError } = await requireAuth();
+  if (authError) return authError;
+
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;

@@ -1,16 +1,14 @@
 import { NextResponse } from 'next/server';
 import { processWeeklyPayouts } from '@/lib/payouts';
+import { requireCronSecret } from '@/lib/api-auth';
 
 // GET /api/cron/weekly-payout
 // Triggered by Vercel Cron every Friday at 10pm UTC (5pm CDT)
 // Processes weekly batch payouts for all providers with available balances.
 export async function GET(request: Request) {
-  // Verify cron secret
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  // H2 FIX: Fail-closed — require CRON_SECRET, reject if unset
+  const cronError = requireCronSecret(request);
+  if (cronError) return cronError;
 
   try {
     console.log('[Cron] Starting weekly payout batch...');

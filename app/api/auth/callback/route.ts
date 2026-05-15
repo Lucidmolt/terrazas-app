@@ -4,14 +4,19 @@ import { createServerSupabaseClient } from '@/lib/supabase-server';
 // POST /api/auth/callback — handle Supabase auth callback
 // Syncs Supabase Auth user → Prisma User table, sends welcome email on first login.
 export async function POST(request: Request) {
-  const { event, session } = await request.json();
-  const supabase = await createServerSupabaseClient();
+  try {
+    // H4 FIX: Validate the session server-side instead of trusting client-provided data
+    const supabase = await createServerSupabaseClient();
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
-  if (event === 'SIGNED_IN' && session) {
-    // Sync Supabase Auth user → Prisma User table
+    if (authError || !authUser) {
+      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 });
+    }
+
+    // Now safely use server-verified user data
     const { db } = await import('@/lib/db');
-    const email = session.user.email;
-    const phone = session.user.phone;
+    const email = authUser.email;
+    const phone = authUser.phone;
 
     // Check if user exists in our DB
     let user = await db.user.findFirst({
@@ -27,8 +32,8 @@ export async function POST(request: Request) {
         data: {
           email: email || undefined,
           phone: phone || undefined,
-          name: session.user.user_metadata?.name || email?.split('@')[0] || 'New User',
-          role: session.user.user_metadata?.role || 'customer',
+          name: authUser.user_metadata?.name || email?.split('@')[0] || 'New User',
+          role: authUser.user_metadata?.role || 'customer',
         },
       });
     }
@@ -44,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ user, synced: true, isNewUser });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Auth callback failed' }, { status: 500 });
   }
-
-  return NextResponse.json({ ok: true });
 }

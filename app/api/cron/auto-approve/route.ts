@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCronSecret } from '@/lib/api-auth';
 
 // GET /api/cron/auto-approve — Auto-approve jobs past their 10-minute deadline
 // Called by Vercel Cron every minute
 export async function GET(request: Request) {
-  // Verify cron secret in production
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  // H2 FIX: Fail-closed — require CRON_SECRET, reject if unset
+  const cronError = requireCronSecret(request);
+  if (cronError) return cronError;
 
   try {
     const now = new Date();

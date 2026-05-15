@@ -7,8 +7,11 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Public routes — no auth needed
-  const publicPaths = ['/', '/login', '/terms', '/onboarding', '/auth', '/api/webhooks', '/api/cron', '/api/pricing', '/api/coverage', '/api/business', '/api/providers', '/api/jobs', '/api/geo', '/api/auth', '/api/upload'];
-  if (publicPaths.some(p => pathname.startsWith(p))) return res;
+  const publicPaths = ['/', '/login', '/terms', '/onboarding', '/auth'];
+  if (publicPaths.some(p => pathname === p || pathname.startsWith(p + '/'))) return res;
+
+  // API routes handle their own auth via requireAuth()/requireAdmin()/requireCronSecret()
+  if (pathname.startsWith('/api/')) return res;
 
   // Static assets
   if (pathname.startsWith('/_next') || pathname.startsWith('/favicon') || pathname.includes('.')) return res;
@@ -20,17 +23,22 @@ export async function middleware(request: NextRequest) {
     { cookies: { getAll: () => request.cookies.getAll().map(c => ({ name: c.name, value: c.value })), setAll: (cookies) => { cookies.forEach(({ name, value, options }) => res.cookies.set(name, value, options)); } } }
   );
 
-  const { data: { session } } = await supabase.auth.getSession();
+  // C3 FIX: Use getUser() instead of getSession() — server-verified, not forgeable
+  const { data: { user } } = await supabase.auth.getUser();
 
-  // Protected pages — redirect to login if no session
+  // Protected pages — redirect to login if no user
   const protectedPages = ['/dashboard', '/pro', '/admin', '/post', '/account'];
-  if (!session && protectedPages.some(p => pathname.startsWith(p))) {
+  if (!user && protectedPages.some(p => pathname.startsWith(p))) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Admin pages — check role
-  if (pathname.startsWith('/admin') && session) {
-    // For now, admin check will happen client-side
+  // Admin pages — enforce role server-side
+  if (pathname.startsWith('/admin') && user) {
+    // Check user role from metadata or DB
+    const role = user.user_metadata?.role;
+    if (role !== 'admin') {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
   }
 
   return res;

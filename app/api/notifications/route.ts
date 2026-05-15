@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getUserNotifications, markNotificationRead, getUnreadCount } from '@/lib/notifications';
+import { requireAuth } from '@/lib/api-auth';
 
-// GET /api/notifications?userId=...&limit=20
+// GET /api/notifications — get notifications for the authenticated user
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get('userId');
+  // C1 FIX: Require authentication — scope to authenticated user
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
 
-  if (!userId) {
-    return NextResponse.json({ error: 'userId is required' }, { status: 400 });
-  }
+  const { searchParams } = new URL(request.url);
+  const userId = dbUser!.id;
 
   const [notifications, unreadCount] = await Promise.all([
     getUserNotifications(userId, parseInt(searchParams.get('limit') || '20')),
@@ -20,6 +21,10 @@ export async function GET(request: Request) {
 
 // POST /api/notifications — mark notification as read
 export async function POST(request: Request) {
+  // C1 FIX: Require authentication
+  const { error: authError } = await requireAuth();
+  if (authError) return authError;
+
   const { notificationId } = await request.json();
 
   if (!notificationId) {

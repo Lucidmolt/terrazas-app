@@ -8,8 +8,14 @@ let _supabase: SupabaseClient | null = null;
 
 function getSupabase(): SupabaseClient {
   if (!_supabase) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // H1 FIX: Fail-closed — require service role key, never fall back to anon key
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error('[Storage] NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for storage operations.');
+    }
+
     _supabase = createClient(supabaseUrl, supabaseServiceKey);
   }
   return _supabase;

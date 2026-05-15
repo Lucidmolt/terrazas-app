@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { clearHeldFunds } from '@/lib/payouts';
 import { db } from '@/lib/db';
+import { requireCronSecret } from '@/lib/api-auth';
 
 // GET /api/cron/clear-holds
 // Triggered by Vercel Cron daily at 6am UTC (1am CDT)
@@ -8,12 +9,9 @@ import { db } from '@/lib/db';
 // This ensures the "Available" balance is always up-to-date
 // even if a provider hasn't opened their dashboard.
 export async function GET(request: Request) {
-  // Verify cron secret
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  // H2 FIX: Fail-closed — require CRON_SECRET, reject if unset
+  const cronError = requireCronSecret(request);
+  if (cronError) return cronError;
 
   try {
     // Find all providers with pending funds

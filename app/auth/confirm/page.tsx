@@ -18,7 +18,8 @@ function ConfirmContent() {
     // Supabase Auth handles the token exchange automatically via the URL hash
     // We just need to check if the session is now valid
     const checkSession = async () => {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      // C3 FIX: Use getUser() for server-verified auth instead of getSession()
+      const { data: { user }, error } = await supabase.auth.getUser();
 
       if (error) {
         setStatus('error');
@@ -26,13 +27,13 @@ function ConfirmContent() {
         return;
       }
 
-      if (session) {
+      if (user) {
         // Sync user to our database
         try {
           await fetch('/api/auth/callback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event: 'SIGNED_IN', session }),
+            body: JSON.stringify({ event: 'SIGNED_IN' }),
           });
         } catch {
           // Non-fatal — user is still authenticated

@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
 import { repulseJob } from '@/lib/escalation';
+import { requireAdmin } from '@/lib/api-auth';
 
 // POST /api/admin/repulse — Manual re-broadcast of a stale job
 // This is the "Re-pulse" button in the admin dashboard.
 // It resets the broadcast timer and sends the job to all providers again.
 export async function POST(request: Request) {
+  // H3 FIX: Require admin role
+  const { error: authError } = await requireAdmin();
+  if (authError) return authError;
+
   try {
     const { jobId } = await request.json();
 

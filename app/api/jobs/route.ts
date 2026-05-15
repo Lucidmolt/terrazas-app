@@ -5,15 +5,17 @@ import { calculateDynamicPrice } from '@/lib/pricing';
 import { broadcastJobToProviders } from '@/lib/notifications';
 import { maskJobsForViewer } from '@/lib/context-envelope';
 import { runEscalationCheck } from '@/lib/escalation';
+import { requireAuth } from '@/lib/api-auth';
 
 // GET /api/jobs — list jobs (broadcast for pros, own for customers)
 export async function GET(request: Request) {
+  // C1 FIX: Require authentication
+  const { user, dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
   const zip = searchParams.get('zip');
-  const customerId = searchParams.get('customerId');
-  const viewerId = searchParams.get('viewerId');
-  const viewerRole = searchParams.get('viewerRole') || 'customer';
 
   try {
     // ── Inline auto-approve: resolve expired 10-min veto deadlines ──
@@ -82,7 +84,19 @@ export async function GET(request: Request) {
       where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
     }
     if (zip) where.zipCode = zip;
-    if (customerId) where.customerId = customerId;
+
+    // M1 FIX: Scope queries to the authenticated user's own data
+    const viewerRole = dbUser?.role || 'customer';
+    const viewerId = dbUser?.id;
+
+    if (viewerRole === 'customer') {
+      // Customers only see their own jobs + broadcast jobs
+      where.OR = [
+        { customerId: viewerId },
+        { status: 'broadcast' },
+      ];
+    }
+    // Pros and admins can see all matching jobs (filtered by status/zip)
 
     const jobs = await db.job.findMany({
       where,
@@ -96,7 +110,7 @@ export async function GET(request: Request) {
 
     // ── System 3: Apply Sovereign Context Envelope ──
     // Mask sensitive data based on who's viewing
-    const maskedJobs = maskJobsForViewer(jobs, viewerId, viewerRole);
+    const maskedJobs = maskJobsForViewer(jobs, viewerId || null, viewerRole);
 
     return NextResponse.json({ jobs: maskedJobs });
   } catch (error: any) {
@@ -106,37 +120,27 @@ export async function GET(request: Request) {
 
 // POST /api/jobs — create a new job with dynamic pricing
 export async function POST(request: Request) {
+  // C1 FIX: Require authentication
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
+
   try {
     const body = await request.json();
     let {
-      customerId, zipCode, address, latitude, longitude, placeId,
+      zipCode, address, latitude, longitude, placeId,
       serviceType, tier, providerId, customerNotes,
       // Dynamic pricing inputs
       scope, lotSize, urgency, conditionScore, extras,
       // Photos
       photoFrontUrl, photoBackUrl, photoExtraUrl,
-      // Optional override (admin/testing only)
-      priceOverride,
     } = body;
 
     if (!zipCode) {
       return NextResponse.json({ error: 'zipCode is required' }, { status: 400 });
     }
 
-    // Resolve customer ID
-    if (!customerId || customerId.startsWith('demo')) {
-      const demoCustomer = await db.user.findFirst({ where: { role: 'customer' } });
-      if (!demoCustomer) {
-        return NextResponse.json({ error: 'No customer found in database' }, { status: 500 });
-      }
-      customerId = demoCustomer.id;
-    }
-
-    // Resolve provider ID
-    if (providerId && providerId.startsWith('demo')) {
-      const demoPro = await db.provider.findFirst({ where: { isActive: true } });
-      providerId = demoPro?.id || null;
-    }
+    // M1 FIX: Use the authenticated user's ID — no arbitrary customerId from body
+    const customerId = dbUser!.id;
 
     // Auto-geocode address
     if (address && (!latitude || !longitude)) {
@@ -188,8 +192,8 @@ export async function POST(request: Request) {
         lotSizeMultiplier: pricing.lotSizeMultiplier,
         urgencyMultiplier: pricing.urgencyMultiplier,
 
-        // Final amounts
-        price: priceOverride || pricing.jobPrice,
+        // Final amounts — no priceOverride from client
+        price: pricing.jobPrice,
         serviceFee: pricing.serviceFee,
         processingFee: pricing.processingFee,
         extrasTotal: pricing.extrasTotal,
@@ -243,4 +247,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

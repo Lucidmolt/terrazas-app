@@ -1,20 +1,24 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { broadcastJobToProviders } from '@/lib/notifications';
+import { requireAuth } from '@/lib/api-auth';
 
 // POST /api/jobs/[id]/veto — Customer vetoes the claiming provider
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // C1 FIX: Require authentication
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
+
   const { id: jobId } = await params;
 
   try {
-    const { customerId, reason } = await request.json();
+    const { reason } = await request.json();
 
-    if (!customerId) {
-      return NextResponse.json({ error: 'customerId is required' }, { status: 400 });
-    }
+    // Use authenticated user's ID — not from request body
+    const customerId = dbUser!.id;
 
     // Get the job
     const job = await db.job.findUnique({ where: { id: jobId } });
@@ -107,9 +111,6 @@ export async function POST(
         console.error('Re-broadcast error:', err);
       });
     }
-
-    // Notify the vetoed provider (they just see "reassigned")
-    // This is handled inside broadcastJobToProviders indirectly
 
     return NextResponse.json({
       job: updatedJob,

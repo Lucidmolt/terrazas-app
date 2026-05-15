@@ -109,7 +109,7 @@ function LoginContent() {
         await fetch('/api/auth/callback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ event: 'SIGNED_IN', session: data.session }),
+          body: JSON.stringify({ event: 'SIGNED_IN' }),
         });
       } catch {
         // Non-fatal

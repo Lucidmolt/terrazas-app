@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { releaseEscrow } from '@/lib/risk-tier';
+import { requireAdmin } from '@/lib/api-auth';
 
 // GET /api/admin/escrow — List all escrow holds with provider info
 export async function GET() {
+  // H3 FIX: Require admin role
+  const { error: authError } = await requireAdmin();
+  if (authError) return authError;
+
   try {
     const holds = await db.escrowHold.findMany({
       orderBy: { createdAt: 'desc' },
@@ -53,6 +58,10 @@ export async function GET() {
 
 // POST /api/admin/escrow — Release or claim escrow holds
 export async function POST(request: Request) {
+  // H3 FIX: Require admin role
+  const { error: authError } = await requireAdmin();
+  if (authError) return authError;
+
   try {
     const { action, providerId, holdId, reason } = await request.json();
 

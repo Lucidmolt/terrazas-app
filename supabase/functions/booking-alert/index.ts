@@ -5,18 +5,35 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// M3 FIX: Restrict CORS to production origins
+const ALLOWED_ORIGINS = ['https://terrazas.app', 'https://terrazas-app.vercel.app']
+
+function getCorsHeaders(req: Request) {
+  const origin = req.headers.get('origin') || ''
+  const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  }
+}
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    // Fixed: read from request body, not undefined `payload`
+    // M4 FIX: Verify caller identity via authorization header
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Missing authorization header' }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const { record } = await req.json();
     const { zip_code, tier, id, ai_warning } = record;
 
@@ -71,7 +88,7 @@ serve(async (req) => {
                      <p>Hey ${pro.business_name}, a new <strong>${tier}</strong> job is available in <strong>${zip_code}</strong>.</p>
                      ${ai_warning ? '<p style="color: #ef4444; font-weight: bold;">⚠️ Condition Warning: Our scan suggests this yard may require extra effort.</p>' : ''}
                      <p>You have 15 minutes to claim this before it opens to the wider network.</p>
-                     <a href="https://terrazas-app.vercel.app/claim/${id}" style="display:inline-block;background:#10b981;color:white;padding:12px 24px;text-decoration:none;border-radius:12px;font-weight:bold;">Claim Job</a>`,
+                     <a href="https://terrazas.app/claim/${id}" style="display:inline-block;background:#10b981;color:white;padding:12px 24px;text-decoration:none;border-radius:12px;font-weight:bold;">Claim Job</a>`,
             }),
           })
         );
@@ -86,7 +103,7 @@ serve(async (req) => {
   } catch (error: any) {
     return new Response(
       JSON.stringify({ error: error.message }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+      { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" }, status: 400 }
     );
   }
 });

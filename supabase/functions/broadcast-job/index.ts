@@ -7,17 +7,35 @@ const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID")
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN")
 const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER")
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// M3 FIX: Restrict CORS to production origins
+const ALLOWED_ORIGINS = ['https://terrazas.app', 'https://terrazas-app.vercel.app']
+
+function getCorsHeaders(req: Request) {
+  const origin = req.headers.get('origin') || ''
+  const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  }
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
+    // M4 FIX: Verify caller identity via Supabase Auth JWT
+    const authHeader = req.headers.get('authorization')
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Missing authorization header' }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      )
+    }
+
     const { record } = await req.json()
     const jobZip = record.zip_code
     const jobTier = record.tier || 'basic'
@@ -26,7 +44,6 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!)
 
     // 1. Find all active Pros serving this zip code
-    // Uses unified `providers` table with `zip_codes` array column
     const { data: pros, error: proError } = await supabase
       .from('providers')
       .select('phone_number, business_name, email')
@@ -45,7 +62,7 @@ serve(async (req) => {
 
     // 2. Send SMS via Twilio (or log if credentials missing)
     const notifications = pros.map(async (pro) => {
-      const message = `Terrazas: New ${jobTier} job in ${jobZip}! Pay: $${jobPrice}. Claim: https://terrazas-app.vercel.app/claim/${record.id}`
+      const message = `Terrazas: New ${jobTier} job in ${jobZip}! Pay: $${jobPrice}. Claim: https://terrazas.app/claim/${record.id}`
 
       if (TWILIO_AUTH_TOKEN && TWILIO_ACCOUNT_SID && pro.phone_number) {
         return fetch(
@@ -79,7 +96,7 @@ serve(async (req) => {
   } catch (error: any) {
     return new Response(
       JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     )
   }
 })

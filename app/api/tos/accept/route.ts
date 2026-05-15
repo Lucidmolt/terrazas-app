@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireAuth } from '@/lib/api-auth';
 
 const CURRENT_TOS_VERSION = '1.0';
 
 // POST /api/tos/accept — Record TOS acceptance
 export async function POST(request: Request) {
-  try {
-    const { userId, version } = await request.json();
+  // C1 FIX: Require authentication — use auth'd user
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
-    }
+  try {
+    const { version } = await request.json();
 
     const user = await db.user.update({
-      where: { id: userId },
+      where: { id: dbUser!.id },
       data: {
         tosAcceptedAt: new Date(),
         tosVersion: version || CURRENT_TOS_VERSION,
@@ -30,35 +31,19 @@ export async function POST(request: Request) {
   }
 }
 
-// GET /api/tos/accept?userId=xxx — Check if user has accepted current TOS
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get('userId');
+// GET /api/tos/accept — Check if authenticated user has accepted current TOS
+export async function GET() {
+  // C1 FIX: Require authentication
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
 
-  if (!userId) {
-    return NextResponse.json({ error: 'userId required' }, { status: 400 });
-  }
+  const isCurrentVersion = dbUser!.tosVersion === CURRENT_TOS_VERSION;
 
-  try {
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { tosAcceptedAt: true, tosVersion: true },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    const isCurrentVersion = user.tosVersion === CURRENT_TOS_VERSION;
-
-    return NextResponse.json({
-      accepted: !!user.tosAcceptedAt && isCurrentVersion,
-      currentVersion: CURRENT_TOS_VERSION,
-      userVersion: user.tosVersion,
-      acceptedAt: user.tosAcceptedAt,
-      needsReAccept: user.tosAcceptedAt && !isCurrentVersion,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  return NextResponse.json({
+    accepted: !!dbUser!.tosAcceptedAt && isCurrentVersion,
+    currentVersion: CURRENT_TOS_VERSION,
+    userVersion: dbUser!.tosVersion,
+    acceptedAt: dbUser!.tosAcceptedAt,
+    needsReAccept: dbUser!.tosAcceptedAt && !isCurrentVersion,
+  });
 }

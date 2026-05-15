@@ -3,7 +3,6 @@ import Stripe from 'stripe';
 import { db } from '@/lib/db';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', { apiVersion: '2025-04-30.basil' as any });
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
 
 // POST /api/webhooks/stripe — Handle Stripe webhook events
 export async function POST(request: Request) {
@@ -12,14 +11,18 @@ export async function POST(request: Request) {
 
   let event: Stripe.Event;
 
+  // C4 FIX: Always require webhook signature verification. Fail-closed.
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    console.error('[Stripe Webhook] STRIPE_WEBHOOK_SECRET is not configured. Rejecting all events.');
+    return NextResponse.json(
+      { error: 'Webhook endpoint not configured. Set STRIPE_WEBHOOK_SECRET.' },
+      { status: 503 }
+    );
+  }
+
   try {
-    if (webhookSecret) {
-      event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
-    } else {
-      // Dev mode: parse without signature verification
-      event = JSON.parse(body) as Stripe.Event;
-      console.warn('[Stripe Webhook] No webhook secret — skipping signature verification');
-    }
+    event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err: any) {
     console.error('[Stripe Webhook] Signature verification failed:', err.message);
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });

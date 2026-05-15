@@ -1,14 +1,19 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireAuth } from '@/lib/api-auth';
 
 // POST /api/reviews — create a review for a completed job
 export async function POST(request: Request) {
-  try {
-    const { jobId, authorId, providerId, rating, comment, photoUrl } = await request.json();
+  // C1 FIX: Require authentication
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
 
-    if (!jobId || !authorId || !providerId || !rating) {
+  try {
+    const { jobId, providerId, rating, comment, photoUrl } = await request.json();
+
+    if (!jobId || !providerId || !rating) {
       return NextResponse.json(
-        { error: 'jobId, authorId, providerId, and rating are required' },
+        { error: 'jobId, providerId, and rating are required' },
         { status: 400 }
       );
     }
@@ -17,10 +22,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Rating must be between 1 and 5' }, { status: 400 });
     }
 
-    // Verify the job is completed
+    // Use authenticated user as the author
+    const authorId = dbUser!.id;
+
+    // Verify the job is completed and belongs to this customer
     const job = await db.job.findUnique({ where: { id: jobId } });
     if (!job || job.status !== 'completed') {
       return NextResponse.json({ error: 'Can only review completed jobs' }, { status: 400 });
+    }
+    if (job.customerId !== authorId) {
+      return NextResponse.json({ error: 'Not authorized to review this job' }, { status: 403 });
     }
 
     // Create review and update provider rating in a transaction
@@ -57,7 +68,7 @@ export async function POST(request: Request) {
   }
 }
 
-// GET /api/reviews?providerId=xxx — list reviews for a provider
+// GET /api/reviews?providerId=xxx — list reviews for a provider (public read)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const providerId = searchParams.get('providerId');

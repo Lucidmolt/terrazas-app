@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireAuth } from '@/lib/api-auth';
 
 // POST /api/jobs/confirm — customer confirms or rejects a pro's ETA
 export async function POST(request: Request) {
+  // C1 FIX: Require authentication
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { jobId, approved } = await request.json();
 
@@ -18,6 +23,11 @@ export async function POST(request: Request) {
 
       if (!job || !job.pendingProId) {
         return { success: false, message: 'No pending pro for this job' };
+      }
+
+      // Verify the authenticated user owns this job
+      if (job.customerId !== dbUser!.id) {
+        return { success: false, message: 'Not authorized to confirm this job' };
       }
 
       if (approved) {

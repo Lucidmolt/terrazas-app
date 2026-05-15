@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireProvider } from '@/lib/api-auth';
 
 // POST /api/jobs/claim — atomic job claim
 export async function POST(request: Request) {
+  // M2 FIX: Require authenticated provider — no demo fallback
+  const { provider, error: authError } = await requireProvider();
+  if (authError) return authError;
+
   try {
-    let { jobId, providerId, etaMinutes } = await request.json();
+    const { jobId, etaMinutes } = await request.json();
 
     if (!jobId) {
       return NextResponse.json(
@@ -13,14 +18,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Demo mode: resolve actual provider ID from DB
-    if (!providerId || providerId.startsWith('demo')) {
-      const demoPro = await db.provider.findFirst({ where: { isActive: true } });
-      if (!demoPro) {
-        return NextResponse.json({ success: false, message: 'No provider found' }, { status: 500 });
-      }
-      providerId = demoPro.id;
-    }
+    const providerId = provider!.id;
 
     // Atomic claim — check status and update in one transaction
     const result = await db.$transaction(async (tx) => {
