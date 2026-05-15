@@ -10,6 +10,7 @@ interface JobItem {
 }
 
 interface ProviderInfo {
+  id: string;
   proTier: number;
   upgradeEligible: boolean;
   completedJobCount: number;
@@ -19,8 +20,21 @@ interface ProviderInfo {
   equipmentTag: string | null;
 }
 
+interface PayoutInfo {
+  pendingBalance: number;
+  availableBalance: number;
+  escrowHeld: number;
+  nextPayoutDate: string;
+  holdDays: number;
+  canInstant: boolean;
+  instantFee: number;
+  freeInstant: boolean;
+  recentPayouts: any[];
+  lifetimeEarnings: number;
+}
+
 export default function ProDashboard() {
-  const [tab, setTab] = useState<'feed' | 'myjobs'>('feed');
+  const [tab, setTab] = useState<'feed' | 'myjobs' | 'earnings'>('feed');
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [myJobs, setMyJobs] = useState<JobItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +43,9 @@ export default function ProDashboard() {
   const [statusLoading, setStatusLoading] = useState<string | null>(null);
   const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
   const [showUpgradeDetails, setShowUpgradeDetails] = useState(false);
+  const [payoutInfo, setPayoutInfo] = useState<PayoutInfo | null>(null);
+  const [payoutLoading, setPayoutLoading] = useState(false);
+  const [instantResult, setInstantResult] = useState<string | null>(null);
 
   // Fetch broadcast jobs + provider info
   const fetchJobs = async () => {
@@ -109,6 +126,15 @@ export default function ProDashboard() {
             </button>
             <button onClick={() => setTab('myjobs')} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: tab === 'myjobs' ? '#059669' : '#1e293b', color: tab === 'myjobs' ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
               🔧 My Jobs ({myJobs.length})
+            </button>
+            <button onClick={async () => {
+              setTab('earnings');
+              if (providerInfo?.id) {
+                const res = await fetch(`/api/provider/payout?providerId=${providerInfo.id}`);
+                if (res.ok) { const d = await res.json(); setPayoutInfo(d.payout); }
+              }
+            }} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: tab === 'earnings' ? '#059669' : '#1e293b', color: tab === 'earnings' ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+              💰 Earnings
             </button>
           </div>
         </div>
@@ -312,6 +338,153 @@ export default function ProDashboard() {
               </div>
             );
           })
+        )}
+
+        {/* ── EARNINGS / PAYOUT TAB ── */}
+        {tab === 'earnings' && (
+          <div>
+            {/* Balance Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+              <div style={{ background: '#1e293b', borderRadius: 14, padding: '16px', border: '1px solid #334155' }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#64748b', marginBottom: 4 }}>PENDING</div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: '#fbbf24' }}>${payoutInfo?.pendingBalance.toFixed(2) || '0.00'}</div>
+                <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>{payoutInfo?.holdDays || 3}-day hold</div>
+              </div>
+              <div style={{ background: '#1e293b', borderRadius: 14, padding: '16px', border: '1px solid #059669' }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#64748b', marginBottom: 4 }}>AVAILABLE</div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: '#34d399' }}>${payoutInfo?.availableBalance.toFixed(2) || '0.00'}</div>
+                <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>Ready to withdraw</div>
+              </div>
+            </div>
+
+            {/* Escrow notice (Community Pro only) */}
+            {isCommunityPro && (payoutInfo?.escrowHeld || 0) > 0 && (
+              <div style={{ background: '#1e293b', borderRadius: 12, padding: '12px 14px', marginBottom: 12, border: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8' }}>🔒 Platform Protection Fund</div>
+                  <div style={{ fontSize: 10, color: '#475569' }}>5% held on first 10 jobs · released after clean record</div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#fbbf24' }}>${payoutInfo?.escrowHeld.toFixed(2)}</div>
+              </div>
+            )}
+
+            {/* Instant Payout Button */}
+            <div style={{ background: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 12, border: '1px solid #334155' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>⚡ Instant Payout</h3>
+                  <p style={{ fontSize: 12, color: '#64748b', margin: 0, marginTop: 4 }}>
+                    {payoutInfo?.freeInstant ? (
+                      <span style={{ color: '#34d399', fontWeight: 700 }}>✓ FREE with Verified Pro</span>
+                    ) : (
+                      <span>${payoutInfo?.instantFee.toFixed(2) || '1.99'} fee per transfer</span>
+                    )}
+                  </p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: '#34d399' }}>${payoutInfo?.availableBalance.toFixed(2) || '0.00'}</div>
+                  {!payoutInfo?.freeInstant && payoutInfo?.availableBalance && payoutInfo.availableBalance > 0 && (
+                    <div style={{ fontSize: 10, color: '#475569' }}>You receive: ${(payoutInfo.availableBalance - payoutInfo.instantFee).toFixed(2)}</div>
+                  )}
+                </div>
+              </div>
+
+              {instantResult && (
+                <div style={{ padding: 10, borderRadius: 8, marginBottom: 10, fontSize: 12, background: instantResult.startsWith('✅') ? '#052e16' : '#450a0a', color: instantResult.startsWith('✅') ? '#34d399' : '#fca5a5' }}>
+                  {instantResult}
+                </div>
+              )}
+
+              <button
+                disabled={payoutLoading || !payoutInfo?.canInstant}
+                onClick={async () => {
+                  if (!providerInfo?.id) return;
+                  setPayoutLoading(true); setInstantResult(null);
+                  try {
+                    const res = await fetch('/api/provider/payout', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ providerId: providerInfo.id, action: 'instant' }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      setInstantResult(`✅ $${data.payout.netPayout.toFixed(2)} sent to your bank!${data.payout.fee > 0 ? ` ($${data.payout.fee.toFixed(2)} fee)` : ' (No fee)'}`);
+                      // Refresh payout info
+                      const r2 = await fetch(`/api/provider/payout?providerId=${providerInfo.id}`);
+                      if (r2.ok) { const d2 = await r2.json(); setPayoutInfo(d2.payout); }
+                    } else {
+                      setInstantResult(`❌ ${data.error}`);
+                    }
+                  } catch { setInstantResult('❌ Failed to process payout'); }
+                  setPayoutLoading(false);
+                }}
+                style={{
+                  width: '100%', padding: 14, borderRadius: 12, border: 'none',
+                  background: payoutInfo?.canInstant ? 'linear-gradient(135deg, #059669, #047857)' : '#1e293b',
+                  color: payoutInfo?.canInstant ? '#fff' : '#475569',
+                  fontWeight: 800, fontSize: 15, cursor: payoutInfo?.canInstant ? 'pointer' : 'not-allowed',
+                  opacity: payoutLoading ? 0.5 : 1,
+                }}
+              >
+                {payoutLoading ? 'Processing...' : payoutInfo?.canInstant ? '⚡ Cash Out Now' : 'No funds available'}
+              </button>
+            </div>
+
+            {/* Weekly Payout Schedule */}
+            <div style={{ background: '#1e293b', borderRadius: 14, padding: '16px', marginBottom: 12, border: '1px solid #334155' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>📅 Next Weekly Payout</div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Every Friday at 5:00 PM · automatic</div>
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#94a3b8' }}>
+                  {payoutInfo?.nextPayoutDate ? new Date(payoutInfo.nextPayoutDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '—'}
+                </div>
+              </div>
+            </div>
+
+            {/* Lifetime Stats */}
+            <div style={{ background: '#1e293b', borderRadius: 14, padding: '16px', marginBottom: 16, border: '1px solid #334155' }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>LIFETIME EARNINGS</div>
+              <div style={{ fontSize: 32, fontWeight: 900, color: '#fff' }}>${payoutInfo?.lifetimeEarnings.toFixed(2) || '0.00'}</div>
+            </div>
+
+            {/* Recent Payouts */}
+            {payoutInfo?.recentPayouts && payoutInfo.recentPayouts.length > 0 && (
+              <div style={{ background: '#1e293b', borderRadius: 14, padding: '16px', border: '1px solid #334155' }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, margin: 0, marginBottom: 12 }}>Recent Payouts</h4>
+                {payoutInfo.recentPayouts.map((p: any) => (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #0f172a' }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        {p.type === 'instant' ? '⚡' : '📅'} ${p.netAmount.toFixed(2)}
+                        {p.instantFee > 0 && <span style={{ fontSize: 10, color: '#64748b' }}> (−${p.instantFee.toFixed(2)} fee)</span>}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#475569' }}>{new Date(p.createdAt).toLocaleDateString()}</div>
+                    </div>
+                    <span style={{
+                      fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 600,
+                      background: p.status === 'completed' ? '#052e16' : p.status === 'failed' ? '#450a0a' : '#1e293b',
+                      color: p.status === 'completed' ? '#34d399' : p.status === 'failed' ? '#fca5a5' : '#94a3b8',
+                    }}>
+                      {p.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Payout info footer */}
+            <div style={{ textAlign: 'center', padding: '20px 0', fontSize: 11, color: '#475569', lineHeight: 1.6 }}>
+              {isCommunityPro ? (
+                <>
+                  Community Pro · {payoutInfo?.holdDays}-day hold · ${payoutInfo?.instantFee.toFixed(2)} instant fee<br />
+                  <span style={{ color: '#059669' }}>Upgrade to Verified Pro for FREE instant payouts →</span>
+                </>
+              ) : (
+                <>Verified Pro · {payoutInfo?.holdDays}-day hold · Free instant payouts ✓</>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

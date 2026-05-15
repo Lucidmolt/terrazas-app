@@ -102,6 +102,13 @@ model Provider {
   bankLinked      Boolean  @default(false)
   totalEarnings   Float    @default(0) // Lifetime earnings
   pendingPayout   Float    @default(0) // Unpaid balance
+  availablePayout Float    @default(0) // Cleared funds (past hold period)
+  payoutSchedule  String   @default("weekly") // weekly (all tiers)
+  payoutHoldDays  Int      @default(3) // Community=3, Verified=1
+  instantPayoutFee Float   @default(1.99) // Fee for instant payout (Community only)
+  freeInstant     Boolean  @default(false) // Verified Pros get free instant
+  lastPayoutAt    DateTime? // When last payout was processed
+  lifetimeInstantFees Float @default(0) // Total instant payout fees collected
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -359,5 +366,25 @@ model EscrowHold {
   createdAt   DateTime @default(now())
 
   @@index([providerId, status])
+}
+
+// ── Payout Records (Audit Trail) ────────────────────────────────────
+// Every payout event: weekly batch or instant on-demand
+model PayoutRecord {
+  id              String   @id @default(cuid())
+  providerId      String
+  type            String   // "weekly" | "instant"
+  grossAmount     Float    // Total before fees
+  escrowHeld      Float    @default(0) // Escrow deducted
+  instantFee      Float    @default(0) // $1.99 fee for instant (Community)
+  netAmount       Float    // What actually gets paid out
+  stripeTransferId String? // Stripe transfer ID
+  status          String   @default("pending") // pending | processing | completed | failed
+  failureReason   String?  // If failed
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([providerId, createdAt])
+  @@index([status])
 }
 
