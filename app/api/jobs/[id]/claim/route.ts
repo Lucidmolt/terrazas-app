@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { notifyJobClaimed } from '@/lib/notifications';
+import { canProviderSeeJob, canAcceptMoreJobs } from '@/lib/risk-tier';
 
 // ── POST /api/jobs/[id]/claim — Atomic Lock Engine ──────────────────
 // Uses PostgreSQL's atomic UPDATE...WHERE to prevent race conditions.
@@ -49,6 +50,47 @@ export async function POST(
     if (blockedProviders.includes(providerId)) {
       return NextResponse.json(
         { error: 'BLOCKED_PRO', message: 'You are not eligible to claim this job' },
+        { status: 403 }
+      );
+    }
+
+    // ── Gig-Tier: Active job cap check ──
+    const jobCapCheck = await canAcceptMoreJobs(providerId);
+    if (!jobCapCheck.canAccept) {
+      return NextResponse.json(
+        { error: 'JOB_CAP_REACHED', message: `You have ${jobCapCheck.activeCount} active jobs (max: ${jobCapCheck.maxAllowed}). Complete a job before claiming another.` },
+        { status: 403 }
+      );
+    }
+
+    // ── Gig-Tier: Tier visibility check ──
+    const tierCheck = canProviderSeeJob(
+      {
+        id: provider.id,
+        proTier: provider.proTier,
+        equipmentTag: provider.equipmentTag,
+        completedJobCount: provider.completedJobCount,
+        rating: provider.rating,
+        isActive: provider.isActive,
+        stripeAccountId: provider.stripeAccountId,
+        idVerified: provider.idVerified,
+        insuranceStatus: provider.insuranceStatus,
+      },
+      {
+        id: job.id,
+        minProTier: job.minProTier,
+        serviceType: job.serviceType,
+        lotSize: job.lotSize,
+        lotSqFt: job.lotSqFt,
+        terrainType: job.terrainType,
+        complexityFlags: job.complexityFlags,
+        price: job.price,
+        conditionGrade: job.conditionGrade,
+      }
+    );
+    if (!tierCheck.visible) {
+      return NextResponse.json(
+        { error: 'TIER_RESTRICTED', message: tierCheck.reason || 'This job is not available for your provider tier.' },
         { status: 403 }
       );
     }

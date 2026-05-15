@@ -85,6 +85,18 @@ model Provider {
   vetoCount        Int      @default(0) // Rolling veto count (resets weekly)
   lastVetoAt       DateTime?
 
+  // ── Gig-Tier (Community Pro) ──
+  proTier          Int      @default(0) // 0=community, 1=verified
+  equipmentPhotoUrl String?             // Photo of mowing equipment
+  equipmentTag     String?              // AI-tagged: "push_mower" | "riding_mower" | "commercial"
+  completedJobCount Int     @default(0) // Lifetime completed jobs
+  upgradeEligible  Boolean  @default(false) // 20+ jobs at 4.8+ rating
+  upgradeOfferedAt DateTime?            // When upgrade was offered
+  escrowBalance    Float    @default(0) // Held escrow for damage protection
+  escrowHoldPct    Float    @default(0.05) // 5% hold on first 10 payouts
+  idVerified       Boolean  @default(false) // Identity verified
+  maxActiveJobs    Int      @default(2) // Community=2, Verified=unlimited
+
   // ── Payout Info ──
   bankLinked      Boolean  @default(false)
   totalEarnings   Float    @default(0) // Lifetime earnings
@@ -156,6 +168,13 @@ model Job {
   pendingProId     String?
   customerNotes    String?   // Special instructions from customer
   surgeLevel       String?   // low | normal | busy | high | peak | parachute
+
+  // ── Gig-Tier Visibility ──
+  minProTier       Int       @default(0) // 0=any pro, 1=verified only
+  complexityFlags  String    @default("[]") // JSON: ["pool","steep","expensive_landscaping"]
+  terrainType      String    @default("flat") // flat | sloped | steep
+  lotSqFt          Int?      // Lot size in square feet (for gig-tier cap)
+  economyRate      Boolean   @default(false) // Customer opted for economy pricing
 
   // ── Broadcast Escalation (System 2: Time Dilation) ──
   broadcastTier    Int       @default(1)  // 0=preferred, 1=local_zip, 2=global
@@ -324,5 +343,20 @@ model YardScan {
   rawResponse     String?  // Full AI response for debugging
   processingMs    Int?     // How long the scan took
   createdAt       DateTime @default(now())
+}
+
+// ── Escrow Holds (Gig-Tier Protection Fund) ─────────────────────────
+// Withheld portion of Community Pro payouts for damage coverage
+model EscrowHold {
+  id          String   @id @default(cuid())
+  providerId  String
+  jobId       String
+  amount      Float    // Dollars withheld from this payout
+  status      String   @default("held") // held | released | claimed
+  reason      String?  // If claimed: what the damage was
+  releasedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([providerId, status])
 }
 
