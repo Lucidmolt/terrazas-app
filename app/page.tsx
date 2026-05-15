@@ -179,12 +179,12 @@ export default function HomePage() {
   };
 
   // Google Maps JS API — loads once, renders live map, works with referrer restrictions
-  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || 'AIzaSyDzEirMQ11PgzxW1lREvX9F5ogLK3evZCQ';
+  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || '';
   const mapContainerRef = React.useRef<HTMLDivElement>(null);
   const mapInstanceRef = React.useRef<any>(null);
 
   useEffect(() => {
-    if (!mounted || !mapContainerRef.current) return;
+    if (!mounted || !mapContainerRef.current || !mapsKey) return;
     // Only load the script once
     if (!(window as any).google?.maps) {
       const script = document.createElement('script');
