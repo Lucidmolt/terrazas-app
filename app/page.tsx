@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { TIERS, BROADCAST_WINDOW_SECONDS } from '@/lib/constants';
+import AuthModal from '@/components/AuthModal';
 
 type View = 'zip' | 'provider-choice' | 'preferred' | 'tiers' | 'searching' | 'success';
 
@@ -33,6 +34,7 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [mapCenter, setMapCenter] = useState({ lat: 37.0439, lng: -100.921 }); // Liberal, KS default
   const [mapZoom, setMapZoom] = useState(13);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
 
   // ── Hydration-safe mount ──────────────────────────────────────────
   useEffect(() => {
@@ -283,10 +285,10 @@ export default function HomePage() {
               <span className="text-xs font-black text-slate-900">{activeZip}</span>
             </div>
           )}
-          <a href="/login" className="flex items-center space-x-2 bg-slate-50 p-1.5 rounded-4xl border border-slate-100 hover:border-brand-300 transition-colors">
+          <button onClick={() => setAuthModalOpen(true)} className="flex items-center space-x-2 bg-slate-50 p-1.5 rounded-4xl border border-slate-100 hover:border-brand-300 transition-colors cursor-pointer">
             <span className="text-xs font-bold px-2">Sign In</span>
             <div className="w-8 h-8 rounded-xl bg-brand-600 flex items-center justify-center text-white text-xs font-bold">→</div>
-          </a>
+          </button>
         </div>
       </header>
 
@@ -477,6 +479,9 @@ export default function HomePage() {
           <div className="text-micro text-brand-900 tracking-[0.4em]">Connecting</div>
         </div>
       )}
+
+      {/* Auth Modal */}
+      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </div>
   );
 }
