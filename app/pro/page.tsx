@@ -6,35 +6,35 @@ interface JobItem {
   id: string; status: string; serviceType: string; tier: string; zipCode: string;
   address: string; price: number; providerPayout: number; customerTotal: number;
   aiWarning: boolean; conditionNotes: string | null; createdAt: string;
+  completedAt?: string; cancelledAt?: string;
   customer?: { name: string | null };
+  review?: { rating: number; comment: string | null } | null;
+  tip?: { amount: number; status: string } | null;
 }
 
 interface ProviderInfo {
-  id: string;
-  proTier: number;
-  upgradeEligible: boolean;
-  completedJobCount: number;
-  rating: number;
-  escrowBalance: number;
-  maxActiveJobs: number;
-  equipmentTag: string | null;
+  id: string; proTier: number; upgradeEligible: boolean; completedJobCount: number;
+  rating: number; escrowBalance: number; maxActiveJobs: number; equipmentTag: string | null;
+  businessName: string; phone: string | null; bio: string | null; email: string | null;
+  zipCodes: string; equipmentType: string | null; teamSize: string | null;
+  serviceRadiusMi: number; reviewCount: number;
+  user?: { name: string | null; email: string | null };
+}
+
+interface ProviderStats {
+  completedJobs: number; cancelledJobs: number;
+  thisMonthEarnings: number; thisMonthJobs: number;
+  monthlyEarnings: { month: string; revenue: number; jobs: number }[];
 }
 
 interface PayoutInfo {
-  pendingBalance: number;
-  availableBalance: number;
-  escrowHeld: number;
-  nextPayoutDate: string;
-  holdDays: number;
-  canInstant: boolean;
-  instantFee: number;
-  freeInstant: boolean;
-  recentPayouts: any[];
-  lifetimeEarnings: number;
+  pendingBalance: number; availableBalance: number; escrowHeld: number;
+  nextPayoutDate: string; holdDays: number; canInstant: boolean;
+  instantFee: number; freeInstant: boolean; recentPayouts: any[]; lifetimeEarnings: number;
 }
 
 export default function ProDashboard() {
-  const [tab, setTab] = useState<'feed' | 'myjobs' | 'earnings'>('feed');
+  const [tab, setTab] = useState<'feed' | 'myjobs' | 'earnings' | 'history' | 'profile'>('feed');
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [myJobs, setMyJobs] = useState<JobItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +46,15 @@ export default function ProDashboard() {
   const [payoutInfo, setPayoutInfo] = useState<PayoutInfo | null>(null);
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [instantResult, setInstantResult] = useState<string | null>(null);
+  const [providerStats, setProviderStats] = useState<ProviderStats | null>(null);
+  const [historyJobs, setHistoryJobs] = useState<JobItem[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
+  const [profileEditing, setProfileEditing] = useState(false);
+  const [profileForm, setProfileForm] = useState({ businessName: '', phone: '', bio: '', zipCodes: '', equipmentType: '', teamSize: '', name: '' });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState('');
 
   // Fetch broadcast jobs + provider info
   const fetchJobs = async () => {
@@ -57,7 +66,11 @@ export default function ProDashboard() {
       ]);
       const bData = await bRes.json(); setJobs(bData.jobs || []);
       const mData = await mRes.json(); setMyJobs(mData.jobs || []);
-      if (pRes.ok) { const pData = await pRes.json(); setProviderInfo(pData.provider || null); }
+      if (pRes.ok) {
+        const pData = await pRes.json();
+        setProviderInfo(pData.provider || null);
+        if (pData.stats) setProviderStats(pData.stats);
+      }
     } catch {} finally { setLoading(false); }
   };
   useEffect(() => { fetchJobs(); const i = setInterval(fetchJobs, 10000); return () => clearInterval(i); }, []);
@@ -121,21 +134,36 @@ export default function ProDashboard() {
             {providerInfo?.proTier === 1 && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#059669', color: '#fff', fontWeight: 600 }}>✓ VERIFIED</span>}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setTab('feed')} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: tab === 'feed' ? '#059669' : '#1e293b', color: tab === 'feed' ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-              📡 Feed ({jobs.length})
-            </button>
-            <button onClick={() => setTab('myjobs')} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: tab === 'myjobs' ? '#059669' : '#1e293b', color: tab === 'myjobs' ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-              🔧 My Jobs ({myJobs.length})
-            </button>
-            <button onClick={async () => {
-              setTab('earnings');
-              if (providerInfo?.id) {
-                const res = await fetch(`/api/provider/payout?providerId=${providerInfo.id}`);
-                if (res.ok) { const d = await res.json(); setPayoutInfo(d.payout); }
-              }
-            }} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: tab === 'earnings' ? '#059669' : '#1e293b', color: tab === 'earnings' ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-              💰 Earnings
-            </button>
+            {(['feed', 'myjobs', 'history', 'earnings', 'profile'] as const).map(t => {
+              const labels = { feed: `📡 ${jobs.length}`, myjobs: `🔧 ${myJobs.length}`, history: '📋', earnings: '💰', profile: '👤' };
+              return (
+                <button key={t} onClick={async () => {
+                  setTab(t);
+                  if (t === 'earnings' && providerInfo?.id) {
+                    const res = await fetch(`/api/provider/payout?providerId=${providerInfo.id}`);
+                    if (res.ok) { const d = await res.json(); setPayoutInfo(d.payout); }
+                  }
+                  if (t === 'history' && historyJobs.length === 0) {
+                    const s = historyFilter === 'all' ? 'completed,cancelled' : historyFilter;
+                    const res = await fetch(`/api/provider/history?status=${s}&page=1`);
+                    if (res.ok) { const d = await res.json(); setHistoryJobs(d.jobs); setHistoryTotal(d.pagination.total); }
+                  }
+                  if (t === 'profile' && providerInfo) {
+                    setProfileForm({
+                      businessName: providerInfo.businessName || '',
+                      phone: providerInfo.phone || '',
+                      bio: providerInfo.bio || '',
+                      zipCodes: (() => { try { return JSON.parse(providerInfo.zipCodes).join(', '); } catch { return providerInfo.zipCodes; } })(),
+                      equipmentType: providerInfo.equipmentType || 'residential',
+                      teamSize: providerInfo.teamSize || 'solo',
+                      name: providerInfo.user?.name || '',
+                    });
+                  }
+                }} style={{ padding: '5px 10px', borderRadius: 8, border: 'none', background: tab === t ? '#059669' : '#1e293b', color: tab === t ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                  {labels[t]}
+                </button>
+              );
+            })}
           </div>
         </div>
       </header>
@@ -483,6 +511,235 @@ export default function ProDashboard() {
               ) : (
                 <>Verified Pro · {payoutInfo?.holdDays}-day hold · Free instant payouts ✓</>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ── JOB HISTORY TAB ── */}
+        {tab === 'history' && (
+          <div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+              {(['all', 'completed', 'cancelled'] as const).map(f => (
+                <button key={f} onClick={async () => {
+                  setHistoryFilter(f); setHistoryPage(1);
+                  const s = f === 'all' ? 'completed,cancelled' : f;
+                  const res = await fetch(`/api/provider/history?status=${s}&page=1`);
+                  if (res.ok) { const d = await res.json(); setHistoryJobs(d.jobs); setHistoryTotal(d.pagination.total); }
+                }} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: historyFilter === f ? '#059669' : '#1e293b', color: historyFilter === f ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 11, cursor: 'pointer', textTransform: 'capitalize' }}>
+                  {f} ({f === 'all' ? (providerStats?.completedJobs || 0) + (providerStats?.cancelledJobs || 0) : f === 'completed' ? providerStats?.completedJobs || 0 : providerStats?.cancelledJobs || 0})
+                </button>
+              ))}
+            </div>
+
+            {historyJobs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
+                <div style={{ fontSize: 48 }}>📋</div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 12 }}>No job history yet</h2>
+                <p style={{ fontSize: 13 }}>Completed jobs will appear here.</p>
+              </div>
+            ) : historyJobs.map(job => (
+              <div key={job.id} style={{ background: '#1e293b', borderRadius: 14, padding: 16, marginBottom: 10, border: '1px solid #334155' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div>
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 6, background: job.status === 'completed' ? '#052e16' : '#450a0a', color: job.status === 'completed' ? '#34d399' : '#fca5a5', fontWeight: 700 }}>
+                      {job.status === 'completed' ? '✓ Completed' : '✗ Cancelled'}
+                    </span>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 6 }}>{job.serviceType?.replace('_', ' ')} — {job.tier}</h3>
+                    <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>📍 {job.address || job.zipCode}</p>
+                    {job.customer?.name && <p style={{ fontSize: 11, color: '#64748b', margin: 0 }}>Customer: {job.customer.name}</p>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: job.status === 'completed' ? '#34d399' : '#64748b' }}>${job.providerPayout || job.price}</div>
+                    <div style={{ fontSize: 10, color: '#475569' }}>
+                      {job.completedAt ? new Date(job.completedAt).toLocaleDateString() : job.cancelledAt ? new Date(job.cancelledAt).toLocaleDateString() : ''}
+                    </div>
+                  </div>
+                </div>
+                {job.review && (
+                  <div style={{ background: '#0f172a', borderRadius: 10, padding: 10, marginTop: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24' }}>{'★'.repeat(job.review.rating)}{'☆'.repeat(5 - job.review.rating)}</div>
+                    {job.review.comment && <p style={{ fontSize: 11, color: '#94a3b8', margin: '4px 0 0' }}>&ldquo;{job.review.comment}&rdquo;</p>}
+                  </div>
+                )}
+                {job.tip && job.tip.status === 'completed' && (
+                  <div style={{ fontSize: 11, color: '#34d399', marginTop: 6, fontWeight: 600 }}>💚 Tip: ${job.tip.amount.toFixed(2)}</div>
+                )}
+              </div>
+            ))}
+
+            {historyTotal > 20 && (
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 16 }}>
+                <button disabled={historyPage <= 1} onClick={async () => {
+                  const p = historyPage - 1; setHistoryPage(p);
+                  const s = historyFilter === 'all' ? 'completed,cancelled' : historyFilter;
+                  const res = await fetch(`/api/provider/history?status=${s}&page=${p}`);
+                  if (res.ok) { const d = await res.json(); setHistoryJobs(d.jobs); }
+                }} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #334155', background: '#1e293b', color: '#94a3b8', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+                  ← Prev
+                </button>
+                <span style={{ fontSize: 12, color: '#64748b', alignSelf: 'center' }}>Page {historyPage}</span>
+                <button disabled={historyPage * 20 >= historyTotal} onClick={async () => {
+                  const p = historyPage + 1; setHistoryPage(p);
+                  const s = historyFilter === 'all' ? 'completed,cancelled' : historyFilter;
+                  const res = await fetch(`/api/provider/history?status=${s}&page=${p}`);
+                  if (res.ok) { const d = await res.json(); setHistoryJobs(d.jobs); }
+                }} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #334155', background: '#1e293b', color: '#94a3b8', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+                  Next →
+                </button>
+              </div>
+            )}
+
+            {/* Analytics Section within History */}
+            {providerStats && providerStats.monthlyEarnings.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 800, color: '#94a3b8', marginBottom: 12 }}>📊 Revenue Trend</h3>
+                <div style={{ background: '#1e293b', borderRadius: 14, padding: 16, border: '1px solid #334155' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 120 }}>
+                    {(() => {
+                      const max = Math.max(...providerStats.monthlyEarnings.map(m => m.revenue), 1);
+                      return providerStats.monthlyEarnings.map(m => (
+                        <div key={m.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: '#34d399' }}>${Math.round(m.revenue)}</div>
+                          <div style={{ width: '100%', background: 'linear-gradient(to top, #059669, #34d399)', borderRadius: 4, height: `${Math.max((m.revenue / max) * 80, 4)}px`, transition: 'height 0.5s' }} />
+                          <div style={{ fontSize: 9, color: '#64748b' }}>{new Date(m.month + '-01').toLocaleDateString('en-US', { month: 'short' })}</div>
+                          <div style={{ fontSize: 8, color: '#475569' }}>{m.jobs} jobs</div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Summary Stats */}
+            {providerStats && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 12 }}>
+                <div style={{ background: '#1e293b', borderRadius: 12, padding: 14, border: '1px solid #334155', textAlign: 'center' }}>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: '#34d399' }}>{providerStats.completedJobs}</div>
+                  <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>COMPLETED</div>
+                </div>
+                <div style={{ background: '#1e293b', borderRadius: 12, padding: 14, border: '1px solid #334155', textAlign: 'center' }}>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24' }}>${Math.round(providerStats.thisMonthEarnings)}</div>
+                  <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>THIS MONTH</div>
+                </div>
+                <div style={{ background: '#1e293b', borderRadius: 12, padding: 14, border: '1px solid #334155', textAlign: 'center' }}>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: '#94a3b8' }}>{providerStats.thisMonthJobs}</div>
+                  <div style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>JOBS/MO</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── PROFILE TAB ── */}
+        {tab === 'profile' && providerInfo && (
+          <div>
+            <div style={{ background: '#1e293b', borderRadius: 16, padding: 24, border: '1px solid #334155', marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>👤 Business Profile</h3>
+                {!profileEditing ? (
+                  <button onClick={() => setProfileEditing(true)} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>✏️ Edit</button>
+                ) : (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => { setProfileEditing(false); setProfileMsg(''); }} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                    <button disabled={profileSaving} onClick={async () => {
+                      setProfileSaving(true); setProfileMsg('');
+                      try {
+                        const res = await fetch('/api/provider/me', {
+                          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ ...profileForm, zipCodes: profileForm.zipCodes.split(',').map(z => z.trim()).filter(Boolean) }),
+                        });
+                        if (res.ok) { setProfileMsg('✅ Profile updated!'); setProfileEditing(false); fetchJobs(); }
+                        else { const d = await res.json(); setProfileMsg(`❌ ${d.error}`); }
+                      } catch { setProfileMsg('❌ Failed to save'); }
+                      setProfileSaving(false);
+                    }} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: '#059669', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: profileSaving ? 0.5 : 1 }}>
+                      {profileSaving ? 'Saving...' : '💾 Save'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {profileMsg && <div style={{ padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 12, background: profileMsg.startsWith('✅') ? '#052e16' : '#450a0a', color: profileMsg.startsWith('✅') ? '#34d399' : '#fca5a5' }}>{profileMsg}</div>}
+
+              <div style={{ display: 'grid', gap: 14 }}>
+                {[
+                  { label: 'YOUR NAME', key: 'name', placeholder: 'John Smith' },
+                  { label: 'BUSINESS NAME', key: 'businessName', placeholder: "Smith's Lawn Care" },
+                  { label: 'PHONE', key: 'phone', placeholder: '(555) 123-4567' },
+                  { label: 'SERVICE ZIP CODES', key: 'zipCodes', placeholder: '67401, 67402' },
+                ].map(field => (
+                  <div key={field.key}>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>{field.label}</label>
+                    {profileEditing ? (
+                      <input value={(profileForm as any)[field.key]} onChange={e => setProfileForm(p => ({ ...p, [field.key]: e.target.value }))}
+                        placeholder={field.placeholder}
+                        style={{ width: '100%', padding: '10px 14px', marginTop: 4, borderRadius: 10, border: '1px solid #334155', background: '#0f172a', color: '#fff', fontSize: 14, fontWeight: 500 }} />
+                    ) : (
+                      <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', marginTop: 4 }}>{(profileForm as any)[field.key] || '—'}</div>
+                    )}
+                  </div>
+                ))}
+
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>BIO</label>
+                  {profileEditing ? (
+                    <textarea value={profileForm.bio} onChange={e => setProfileForm(p => ({ ...p, bio: e.target.value }))}
+                      placeholder="Tell customers about your business..." rows={3}
+                      style={{ width: '100%', padding: '10px 14px', marginTop: 4, borderRadius: 10, border: '1px solid #334155', background: '#0f172a', color: '#fff', fontSize: 14, fontWeight: 500, resize: 'none' as const }} />
+                  ) : (
+                    <div style={{ fontSize: 14, color: '#94a3b8', marginTop: 4, lineHeight: 1.6 }}>{profileForm.bio || 'No bio yet'}</div>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b' }}>EQUIPMENT</label>
+                    {profileEditing ? (
+                      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                        {['residential', 'commercial'].map(t => (
+                          <button key={t} onClick={() => setProfileForm(p => ({ ...p, equipmentType: t }))}
+                            style={{ flex: 1, padding: 8, borderRadius: 8, border: profileForm.equipmentType === t ? '2px solid #059669' : '1px solid #334155', background: profileForm.equipmentType === t ? '#052e16' : '#0f172a', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', textTransform: 'capitalize' as const }}>{t}</button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginTop: 4, textTransform: 'capitalize' as const }}>{profileForm.equipmentType || '—'}</div>
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b' }}>TEAM SIZE</label>
+                    {profileEditing ? (
+                      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                        {['solo', 'small', 'medium'].map(t => (
+                          <button key={t} onClick={() => setProfileForm(p => ({ ...p, teamSize: t }))}
+                            style={{ flex: 1, padding: 8, borderRadius: 8, border: profileForm.teamSize === t ? '2px solid #059669' : '1px solid #334155', background: profileForm.teamSize === t ? '#052e16' : '#0f172a', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', textTransform: 'capitalize' as const }}>{t}</button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginTop: 4, textTransform: 'capitalize' as const }}>{profileForm.teamSize || '—'}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Account Info (read-only) */}
+            <div style={{ background: '#1e293b', borderRadius: 14, padding: 16, border: '1px solid #334155' }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, margin: 0, marginBottom: 12, color: '#94a3b8' }}>Account Info</h4>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {[
+                  { label: 'Email', value: providerInfo.user?.email || providerInfo.email || '—' },
+                  { label: 'Rating', value: `${providerInfo.rating.toFixed(1)}★ (${providerInfo.reviewCount} reviews)` },
+                  { label: 'Tier', value: providerInfo.proTier === 0 ? 'Community Pro' : 'Verified Pro ✓' },
+                  { label: 'Jobs Completed', value: String(providerInfo.completedJobCount) },
+                  { label: 'Service Radius', value: `${providerInfo.serviceRadiusMi} miles` },
+                ].map(item => (
+                  <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #0f172a' }}>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>{item.label}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{item.value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
