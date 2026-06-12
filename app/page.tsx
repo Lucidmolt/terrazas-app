@@ -35,10 +35,35 @@ export default function HomePage() {
   const [mapCenter, setMapCenter] = useState({ lat: 37.0439, lng: -100.921 }); // Liberal, KS default
   const [mapZoom, setMapZoom] = useState(13);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [scanScore, setScanScore] = useState<number | null>(null);
+
+  // Check for scan query parameter or local storage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const scan = params.get('scan');
+      if (scan) {
+        const score = parseFloat(scan);
+        setScanScore(score);
+        localStorage.setItem('terrazas_scan_score', scan);
+      } else {
+        const stored = localStorage.getItem('terrazas_scan_score');
+        if (stored) {
+          setScanScore(parseFloat(stored));
+        }
+      }
+    }
+  }, []);
 
   // ── Hydration-safe mount ──────────────────────────────────────────
   useEffect(() => {
     setMounted(true);
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('login') === 'true') {
+        setAuthModalOpen(true);
+      }
+    }
     // Auto-detect location on mount
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -141,6 +166,7 @@ export default function HomePage() {
           tier: selectedTier,
           serviceType: 'mowing',
           price: tier.basePrice,
+          conditionScore: scanScore !== null ? scanScore : undefined,
         }),
       });
       const data = await res.json();
@@ -155,7 +181,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [activeZip, address, selectedTier]);
+  }, [activeZip, address, selectedTier, scanScore]);
 
   // ── Select Specific Provider ─────────────────────────────────────
   const selectSpecificPro = useCallback(
@@ -173,6 +199,7 @@ export default function HomePage() {
             serviceType: 'mowing',
             price: TIERS[selectedTier].basePrice,
             providerId: provider.id,
+            conditionScore: scanScore !== null ? scanScore : undefined,
           }),
         });
         const data = await res.json();
@@ -186,7 +213,7 @@ export default function HomePage() {
         setLoading(false);
       }
     },
-    [activeZip, address, selectedTier]
+    [activeZip, address, selectedTier, scanScore]
   );
 
   const goHome = useCallback(() => {
@@ -339,6 +366,21 @@ export default function HomePage() {
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Active in <span className="text-brand-600">{activeZip}</span></h2>
                 <p className="text-label">How would you like to book?</p>
               </div>
+              {scanScore !== null && (
+                <div className="flex items-center justify-between p-4 bg-brand-50/80 rounded-3xl border border-brand-100/60 animate-fade-in">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-2xl">🔬</span>
+                    <div className="text-left">
+                      <div className="text-xs font-black text-brand-800 tracking-tight">AI Scan Applied</div>
+                      <div className="text-[10px] font-bold text-brand-600">Condition Score: {scanScore}/10</div>
+                    </div>
+                  </div>
+                  <button onClick={() => { setScanScore(null); localStorage.removeItem('terrazas_scan_score'); }}
+                    className="text-brand-400 hover:text-brand-700 font-black text-micro bg-transparent border-none cursor-pointer px-2 py-1">
+                    Clear
+                  </button>
+                </div>
+              )}
               <div className="space-y-3">
                 <button onClick={() => setView('preferred')} className="w-full p-5 bg-white border-2 border-slate-100 rounded-4xl flex items-center space-x-4 text-left hover:border-brand-500 transition-all">
                   <div className="w-14 h-14 bg-brand-50 rounded-4xl flex items-center justify-center text-3xl">⭐</div>
@@ -468,8 +510,8 @@ export default function HomePage() {
       {/* Bottom Nav */}
       <nav className="relative z-30 p-4 pb-10 bg-white border-t border-slate-50 flex justify-around items-center shrink-0 safe-bottom">
         <button onClick={goHome} className="w-14 h-14 flex items-center justify-center rounded-4xl bg-brand-50 text-brand-600">🏠</button>
-        <a href="/dashboard" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">🗓️</a>
-        <a href="/dashboard" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">👤</a>
+        <a href="/dashboard?tab=jobs" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">🗓️</a>
+        <a href="/dashboard?tab=profile" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">👤</a>
       </nav>
 
       {/* Loader */}

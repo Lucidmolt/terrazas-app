@@ -56,6 +56,12 @@ export default function ProDashboard() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState('');
 
+  // Notifications state
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [highlightedJobId, setHighlightedJobId] = useState<string | null>(null);
+
   // Fetch broadcast jobs + provider info
   const fetchJobs = async () => {
     try {
@@ -73,7 +79,67 @@ export default function ProDashboard() {
       }
     } catch {} finally { setLoading(false); }
   };
-  useEffect(() => { fetchJobs(); const i = setInterval(fetchJobs, 10000); return () => clearInterval(i); }, []);
+
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch('/api/notifications');
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch notifications:', err);
+    }
+  };
+
+  const markAsRead = async (id: string) => {
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId: id }),
+      });
+      if (res.ok) {
+        await fetchNotifications();
+      }
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
+    }
+  };
+
+  const handleNotificationClick = async (notif: any) => {
+    if (!notif.isRead) {
+      await markAsRead(notif.id);
+    }
+    if (notif.jobId) {
+      const isInMyJobs = myJobs.some(j => j.id === notif.jobId);
+      const targetTab = isInMyJobs ? 'myjobs' : 'feed';
+      setTab(targetTab);
+      setHighlightedJobId(notif.jobId);
+      setShowNotifications(false);
+      setTimeout(() => {
+        const el = document.getElementById(`job-${notif.jobId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+      setTimeout(() => {
+        setHighlightedJobId(prev => prev === notif.jobId ? null : prev);
+      }, 4000);
+    }
+  };
+
+  useEffect(() => {
+    fetchJobs();
+    fetchNotifications();
+    const i = setInterval(fetchJobs, 10000);
+    const ni = setInterval(fetchNotifications, 20000);
+    return () => {
+      clearInterval(i);
+      clearInterval(ni);
+    };
+  }, []);
 
   const claimJob = async (jobId: string) => {
     setClaiming(jobId);
@@ -133,37 +199,128 @@ export default function ProDashboard() {
             {isCommunityPro && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#1e293b', color: '#94a3b8', fontWeight: 600 }}>COMMUNITY</span>}
             {providerInfo?.proTier === 1 && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: '#059669', color: '#fff', fontWeight: 600 }}>✓ VERIFIED</span>}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {(['feed', 'myjobs', 'history', 'earnings', 'profile'] as const).map(t => {
-              const labels = { feed: `📡 ${jobs.length}`, myjobs: `🔧 ${myJobs.length}`, history: '📋', earnings: '💰', profile: '👤' };
-              return (
-                <button key={t} onClick={async () => {
-                  setTab(t);
-                  if (t === 'earnings' && providerInfo?.id) {
-                    const res = await fetch(`/api/provider/payout?providerId=${providerInfo.id}`);
-                    if (res.ok) { const d = await res.json(); setPayoutInfo(d.payout); }
-                  }
-                  if (t === 'history' && historyJobs.length === 0) {
-                    const s = historyFilter === 'all' ? 'completed,cancelled' : historyFilter;
-                    const res = await fetch(`/api/provider/history?status=${s}&page=1`);
-                    if (res.ok) { const d = await res.json(); setHistoryJobs(d.jobs); setHistoryTotal(d.pagination.total); }
-                  }
-                  if (t === 'profile' && providerInfo) {
-                    setProfileForm({
-                      businessName: providerInfo.businessName || '',
-                      phone: providerInfo.phone || '',
-                      bio: providerInfo.bio || '',
-                      zipCodes: (() => { try { return JSON.parse(providerInfo.zipCodes).join(', '); } catch { return providerInfo.zipCodes; } })(),
-                      equipmentType: providerInfo.equipmentType || 'residential',
-                      teamSize: providerInfo.teamSize || 'solo',
-                      name: providerInfo.user?.name || '',
-                    });
-                  }
-                }} style={{ padding: '5px 10px', borderRadius: 8, border: 'none', background: tab === t ? '#059669' : '#1e293b', color: tab === t ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
-                  {labels[t]}
-                </button>
-              );
-            })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {/* Bell Icon & Dropdown */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowNotifications(!showNotifications)}
+                style={{
+                  border: 'none',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  position: 'relative',
+                  padding: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: showNotifications ? '#34d399' : '#94a3b8',
+                  borderRadius: '8px',
+                  background: showNotifications ? 'rgba(52, 211, 153, 0.1)' : 'transparent',
+                  transition: 'all 0.2s',
+                }}
+              >
+                🔔
+                {unreadCount > 0 && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-2px',
+                    right: '-2px',
+                    background: '#ef4444',
+                    color: '#fff',
+                    fontSize: '9px',
+                    fontWeight: 900,
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '2px solid #0f172a'
+                  }}>
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {showNotifications && (
+                <div style={{
+                  position: 'absolute',
+                  top: '40px',
+                  right: '0',
+                  width: '300px',
+                  background: 'rgba(30, 41, 59, 0.95)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid #334155',
+                  borderRadius: '16px',
+                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3), 0 8px 10px -6px rgba(0,0,0,0.3)',
+                  zIndex: 50,
+                  maxHeight: '360px',
+                  overflowY: 'auto',
+                  padding: '12px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', paddingBottom: '8px', borderBottom: '1px solid #334155' }}>
+                    <span style={{ fontWeight: 800, fontSize: '13px', color: '#fff' }}>Notifications</span>
+                    {unreadCount > 0 && <span style={{ background: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '2px 8px', borderRadius: '10px' }}>{unreadCount} New</span>}
+                  </div>
+                  {notifications.length === 0 ? (
+                    <p style={{ textAlign: 'center', color: '#64748b', fontSize: '12px', margin: '20px 0' }}>No notifications yet</p>
+                  ) : notifications.map(notif => (
+                    <div
+                      key={notif.id}
+                      onClick={() => handleNotificationClick(notif)}
+                      style={{
+                        padding: '10px',
+                        borderRadius: '10px',
+                        background: notif.isRead ? 'transparent' : 'rgba(52, 211, 153, 0.1)',
+                        marginBottom: '6px',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s',
+                        border: '1px solid',
+                        borderColor: notif.isRead ? 'transparent' : 'rgba(52, 211, 153, 0.2)',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: '12px', color: '#fff' }}>{notif.title}</div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px', lineHeight: '1.4' }}>{notif.body}</div>
+                      <div style={{ fontSize: '9px', color: '#64748b', marginTop: '6px' }}>{new Date(notif.createdAt).toLocaleDateString()}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['feed', 'myjobs', 'history', 'earnings', 'profile'] as const).map(t => {
+                const labels = { feed: `📡 ${jobs.length}`, myjobs: `🔧 ${myJobs.length}`, history: '📋', earnings: '💰', profile: '👤' };
+                return (
+                  <button key={t} onClick={async () => {
+                    setTab(t);
+                    if (t === 'earnings' && providerInfo?.id) {
+                      const res = await fetch(`/api/provider/payout?providerId=${providerInfo.id}`);
+                      if (res.ok) { const d = await res.json(); setPayoutInfo(d.payout); }
+                    }
+                    if (t === 'history' && historyJobs.length === 0) {
+                      const s = historyFilter === 'all' ? 'completed,cancelled' : historyFilter;
+                      const res = await fetch(`/api/provider/history?status=${s}&page=1`);
+                      if (res.ok) { const d = await res.json(); setHistoryJobs(d.jobs); setHistoryTotal(d.pagination.total); }
+                    }
+                    if (t === 'profile' && providerInfo) {
+                      setProfileForm({
+                        businessName: providerInfo.businessName || '',
+                        phone: providerInfo.phone || '',
+                        bio: providerInfo.bio || '',
+                        zipCodes: (() => { try { return JSON.parse(providerInfo.zipCodes).join(', '); } catch { return providerInfo.zipCodes; } })(),
+                        equipmentType: providerInfo.equipmentType || 'residential',
+                        teamSize: providerInfo.teamSize || 'solo',
+                        name: providerInfo.user?.name || '',
+                      });
+                    }
+                  }} style={{ padding: '5px 10px', borderRadius: 8, border: 'none', background: tab === t ? '#059669' : '#1e293b', color: tab === t ? '#fff' : '#94a3b8', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                    {labels[t]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </header>
@@ -293,8 +450,21 @@ export default function ProDashboard() {
             </div>
           ) : jobs.map(job => {
             const statusInfo = JOB_STATUS_LABELS[job.status] || { label: job.status, color: '' };
+            const isHighlighted = highlightedJobId === job.id;
             return (
-              <div key={job.id} style={{ background: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 12, border: '1px solid #334155' }}>
+              <div
+                key={job.id}
+                id={`job-${job.id}`}
+                style={{
+                  background: '#1e293b',
+                  borderRadius: 16,
+                  padding: 20,
+                  marginBottom: 12,
+                  border: isHighlighted ? '2px solid #34d399' : '1px solid #334155',
+                  boxShadow: isHighlighted ? '0 0 15px rgba(52, 211, 153, 0.3)' : 'none',
+                  transition: 'all 0.3s ease-in-out'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                   <div>
                     <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: '#059669', color: '#fff', fontWeight: 700 }}>{statusInfo.label}</span>
@@ -333,8 +503,21 @@ export default function ProDashboard() {
             </div>
           ) : myJobs.map(job => {
             const flow = STATUS_FLOW[job.status];
+            const isHighlighted = highlightedJobId === job.id;
             return (
-              <div key={job.id} style={{ background: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 12, border: '1px solid #334155' }}>
+              <div
+                key={job.id}
+                id={`job-${job.id}`}
+                style={{
+                  background: '#1e293b',
+                  borderRadius: 16,
+                  padding: 20,
+                  marginBottom: 12,
+                  border: isHighlighted ? '2px solid #34d399' : '1px solid #334155',
+                  boxShadow: isHighlighted ? '0 0 15px rgba(52, 211, 153, 0.3)' : 'none',
+                  transition: 'all 0.3s ease-in-out'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                   <div>
                     <h3 style={{ fontSize: 16, fontWeight: 700 }}>📍 {job.address || job.zipCode}</h3>
