@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { TIERS, BROADCAST_WINDOW_SECONDS } from '@/lib/constants';
 import AuthModal from '@/components/AuthModal';
+import { Zap, ShieldCheck, MapPin, CheckCircle2, ArrowRight, Star, TrendingUp, Users } from 'lucide-react';
 
 type View = 'zip' | 'provider-choice' | 'preferred' | 'tiers' | 'searching' | 'success';
 
@@ -294,22 +295,22 @@ export default function HomePage() {
   }, [mapCenter, mapZoom]);
 
   return (
-    <div className="flex flex-col md:flex-row h-screen w-screen bg-slate-950 overflow-hidden relative">
+    <div className="flex flex-col md:flex-row h-screen w-screen bg-white overflow-hidden relative">
       
-      {/* Left Marketing & Supply Panel (Desktop Only) */}
-      <aside className="hidden md:flex md:w-[38%] lg:w-[34%] xl:w-[30%] shrink-0 flex-col bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border-r border-slate-800 text-white p-8 lg:p-10 justify-between overflow-y-auto no-scrollbar relative z-30">
+      {/* Left Marketing & Info Panel (Desktop Only) */}
+      <aside className="hidden md:flex md:w-[38%] lg:w-[34%] xl:w-[30%] shrink-0 flex-col bg-slate-50/50 border-r border-slate-100 text-slate-900 p-8 lg:p-10 justify-between overflow-y-auto no-scrollbar relative z-30">
         <div className="space-y-12">
           {/* Logo & Sign In */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <h1 className="text-2xl font-black tracking-tighter text-brand-500 leading-none">TERRAZAS</h1>
-              <span className="bg-brand-500/20 text-brand-400 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">
-                On-Demand
+            <button onClick={goHome} className="flex items-center space-x-2 cursor-pointer bg-transparent border-none p-0 text-left">
+              <h1 className="text-2xl font-black tracking-tighter text-brand-700 leading-none">TERRAZAS</h1>
+              <span className="bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider">
+                Network
               </span>
-            </div>
+            </button>
             <button 
               onClick={() => openAuth('customer', 'signin')} 
-              className="text-xs font-bold text-slate-300 hover:text-white px-3 py-1.5 border border-slate-800 hover:border-slate-700 rounded-xl transition-all cursor-pointer"
+              className="text-xs font-bold text-slate-600 hover:text-slate-900 px-3 py-1.5 border border-slate-200 hover:border-slate-300 rounded-xl transition-all cursor-pointer bg-white shadow-sm"
             >
               Sign In
             </button>
@@ -317,13 +318,13 @@ export default function HomePage() {
 
           {/* Hero Pitch */}
           <div className="space-y-4">
-            <h2 className="text-4xl font-extrabold tracking-tight text-white leading-tight">
-              Premium Lawn Care, <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-emerald-400">
+            <h2 className="text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">
+              Lawn Care, <br />
+              <span className="text-brand-600">
                 Dispatched Instantly.
               </span>
             </h2>
-            <p className="text-slate-400 text-sm font-medium leading-relaxed">
+            <p className="text-slate-500 text-sm font-medium leading-relaxed">
               Book top-rated, licensed, and insured lawn pros in your neighborhood. Secure escrow payment means your money is safe until you approve the job photo.
             </p>
           </div>
@@ -331,48 +332,48 @@ export default function HomePage() {
           {/* Pillars */}
           <div className="space-y-6">
             <div className="flex items-start space-x-3.5">
-              <div className="w-8 h-8 rounded-lg bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 shrink-0 text-sm">
-                ⚡
+              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
+                <Zap className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white tracking-wide uppercase">Instant Dispatch</h4>
-                <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">
+                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Instant Dispatch</h4>
+                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
                   No haggling or waiting for quotes. Flat-rate booking matches you with active local pros in seconds.
                 </p>
               </div>
             </div>
 
             <div className="flex items-start space-x-3.5">
-              <div className="w-8 h-8 rounded-lg bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 shrink-0 text-sm">
-                🛡️
+              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
+                <ShieldCheck className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white tracking-wide uppercase">Escrow Protection</h4>
-                <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">
+                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Escrow Protection</h4>
+                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
                   Funds held securely in escrow. Released only after you review and approve the provider's completion photos.
                 </p>
               </div>
             </div>
 
             <div className="flex items-start space-x-3.5">
-              <div className="w-8 h-8 rounded-lg bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 shrink-0 text-sm">
-                📍
+              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
+                <MapPin className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white tracking-wide uppercase">Live Route Tracking</h4>
-                <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">
+                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Live Route Tracking</h4>
+                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
                   Watch your provider head to your house in real-time on the map with active SMS and Web Push alerts.
                 </p>
               </div>
             </div>
 
             <div className="flex items-start space-x-3.5">
-              <div className="w-8 h-8 rounded-lg bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 shrink-0 text-sm">
-                ✅
+              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
+                <CheckCircle2 className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white tracking-wide uppercase">Licensed & Insured</h4>
-                <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">
+                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Licensed & Insured</h4>
+                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
                   Every partner pro is background-screened, certified, and fully backed by commercial general liability insurance.
                 </p>
               </div>
@@ -380,38 +381,48 @@ export default function HomePage() {
           </div>
 
           {/* Pro CTA card */}
-          <div className="bg-slate-800/40 border border-slate-800 rounded-3xl p-5 space-y-4">
-            <div className="flex items-center space-x-3">
-              <span className="text-2xl">🚜</span>
+          <div className="bg-white border border-slate-100 rounded-3xl p-5 space-y-4 shadow-sm">
+            <div className="flex items-start space-x-3">
+              <span className="text-2xl shrink-0 mt-0.5">🚜</span>
               <div>
-                <h4 className="text-sm font-bold text-white">Own a Lawn Care Business?</h4>
-                <p className="text-slate-400 text-[11px] font-medium leading-normal">
+                <h4 className="text-sm font-bold text-slate-900">Own a Lawn Care Business?</h4>
+                <p className="text-slate-500 text-[11px] font-medium leading-normal mt-0.5">
                   List your rig, broadcast availability, and secure dispatch jobs in your zone.
                 </p>
               </div>
             </div>
             <button 
               onClick={() => openAuth('pro', 'signup')}
-              className="w-full bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold py-3 px-4 rounded-xl transition-all cursor-pointer shadow-md shadow-brand-900/10 active:scale-[0.98]"
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-3 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1.5 active:scale-[0.98]"
             >
-              Become a Partner Pro
+              <span>Become a Partner Pro</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
         {/* Footer info / stats */}
-        <div className="pt-8 mt-8 border-t border-slate-800/50 flex flex-wrap gap-x-6 gap-y-3 justify-between items-center text-slate-500 text-[11px] font-medium">
-          <div>
-            <span className="text-white font-bold block text-sm">12,000+</span>
-            Yards Mowed
+        <div className="pt-6 mt-8 border-t border-slate-100 flex flex-wrap gap-x-6 gap-y-3 justify-between items-center text-slate-400 text-[11px] font-medium">
+          <div className="flex items-center space-x-2">
+            <TrendingUp className="w-4 h-4 text-brand-600 animate-pulse" />
+            <div>
+              <span className="text-slate-900 font-extrabold block text-xs">12,000+</span>
+              Yards Mowed
+            </div>
           </div>
-          <div>
-            <span className="text-white font-bold block text-sm">4.9 ★</span>
-            Avg. Provider Rating
+          <div className="flex items-center space-x-2">
+            <Star className="w-4 h-4 text-brand-600" />
+            <div>
+              <span className="text-slate-900 font-extrabold block text-xs">4.9 ★</span>
+              Avg. Rating
+            </div>
           </div>
-          <div>
-            <span className="text-white font-bold block text-sm">18 min</span>
-            Avg. Dispatch Time
+          <div className="flex items-center space-x-2">
+            <Users className="w-4 h-4 text-brand-600" />
+            <div>
+              <span className="text-slate-900 font-extrabold block text-xs">18 min</span>
+              Avg. Dispatch
+            </div>
           </div>
         </div>
       </aside>
