@@ -40,16 +40,45 @@ interface DeliveryResult {
 // ── Route 1: WebPush ────────────────────────────────────────────────
 async function sendWebPush(userId: string, title: string, body: string): Promise<DeliveryResult> {
   try {
-    // Get user's push subscription
+    // Get user's push preferences
     const prefs = await db.notificationPreference.findUnique({
       where: { userId },
     });
 
-    if (!prefs?.pushEnabled || !prefs?.pushSubscription) {
-      return { channel: 'push', success: false, error: 'No push subscription' };
+    if (!prefs?.pushEnabled) {
+      return { channel: 'push', success: false, error: 'Push notifications not enabled by user' };
     }
 
-    const subscription = JSON.parse(prefs.pushSubscription);
+    // Get all subscriptions registered under PushSubscription
+    const dbSubscriptions = await db.pushSubscription.findMany({
+      where: { userId },
+    });
+
+    const subscriptions: any[] = [];
+
+    // Map new model format
+    if (dbSubscriptions.length > 0) {
+      dbSubscriptions.forEach(sub => {
+        subscriptions.push({
+          endpoint: sub.endpoint,
+          keys: {
+            auth: sub.auth,
+            p256dh: sub.p256dh,
+          },
+        });
+      });
+    } else if (prefs.pushSubscription) {
+      // Fallback to legacy single-field subscription
+      try {
+        subscriptions.push(JSON.parse(prefs.pushSubscription));
+      } catch (parseErr) {
+        console.error('Failed to parse legacy pushSubscription JSON:', parseErr);
+      }
+    }
+
+    if (subscriptions.length === 0) {
+      return { channel: 'push', success: false, error: 'No push subscriptions found for user' };
+    }
 
     // WebPush requires VAPID keys — check if configured
     const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
@@ -69,13 +98,31 @@ async function sendWebPush(userId: string, title: string, body: string): Promise
         VAPID_PRIVATE
       );
 
-      await webpush.sendNotification(
-        subscription,
-        JSON.stringify({ title, body, icon: '/icon-192.png', badge: '/icon-192.png' })
-      );
+      let successCount = 0;
+      for (const subscription of subscriptions) {
+        try {
+          await webpush.sendNotification(
+            subscription,
+            JSON.stringify({ title, body, icon: '/icon-192.png', badge: '/icon-192.png' })
+          );
+          successCount++;
+        } catch (subErr: any) {
+          console.error(`📲 PUSH SUB DEVICE SEND FAILED:`, subErr.message);
+          // Auto-clean expired subscriptions (410 Gone / 404 Not Found)
+          if (subErr.statusCode === 410 || subErr.statusCode === 404) {
+            await db.pushSubscription.deleteMany({
+              where: { endpoint: subscription.endpoint },
+            });
+          }
+        }
+      }
 
-      console.log(`📲 PUSH SENT → user ${userId}: ${title}`);
-      return { channel: 'push', success: true };
+      if (successCount > 0) {
+        console.log(`📲 PUSH SENT → user ${userId}: ${title} (${successCount} devices)`);
+        return { channel: 'push', success: true };
+      }
+
+      return { channel: 'push', success: false, error: 'All push subscription deliveries failed' };
     } catch (requireErr) {
       // web-push package not installed — graceful fallback
       return { channel: 'push', success: false, error: 'web-push not available' };

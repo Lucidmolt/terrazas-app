@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { JOB_STATUS_LABELS } from '@/lib/constants';
 
 interface JobItem {
@@ -19,6 +19,7 @@ interface ProviderInfo {
   zipCodes: string; equipmentType: string | null; teamSize: string | null;
   serviceRadiusMi: number; reviewCount: number;
   user?: { name: string | null; email: string | null };
+  userId?: string | null;
 }
 
 interface ProviderStats {
@@ -61,6 +62,89 @@ export default function ProDashboard() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [highlightedJobId, setHighlightedJobId] = useState<string | null>(null);
+
+  // New features state
+  const [activeChatJobId, setActiveChatJobId] = useState<string | null>(null);
+  const [announceZipCode, setAnnounceZipCode] = useState('');
+  const [announceHours, setAnnounceHours] = useState('2');
+  const [announcementMsg, setAnnouncementMsg] = useState('');
+  const [announcementLoading, setAnnouncementLoading] = useState(false);
+
+  // Geolocation watch telemetry for active jobs that are en_route
+  useEffect(() => {
+    let watchId: number | null = null;
+    const enRouteJobs = myJobs.filter(j => j.status === 'en_route');
+
+    if (enRouteJobs.length > 0) {
+      const activeJob = enRouteJobs[0];
+      if (typeof window !== 'undefined' && 'geolocation' in navigator) {
+        let lastPostTime = 0;
+        
+        watchId = navigator.geolocation.watchPosition(
+          async (position) => {
+            const now = Date.now();
+            // Throttle reports to every 30 seconds
+            if (now - lastPostTime >= 30000) {
+              lastPostTime = now;
+              const { latitude, longitude } = position.coords;
+              try {
+                await fetch('/api/provider/location', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jobId: activeJob.id,
+                    lat: latitude,
+                    lng: longitude,
+                  }),
+                });
+              } catch (err) {
+                console.error('Failed to report telemetry location:', err);
+              }
+            }
+          },
+          (err) => {
+            console.error('Telemetry watch error:', err);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 15000,
+          }
+        );
+      }
+    }
+
+    return () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [myJobs]);
+
+  const submitAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!announceZipCode.trim() || announcementLoading) return;
+    setAnnouncementLoading(true);
+    setAnnouncementMsg('');
+    try {
+      const res = await fetch('/api/provider/announcements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zipCode: announceZipCode, hours: announceHours }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAnnouncementMsg(`✅ Broadcast active in ${announceZipCode} for ${announceHours} hours!`);
+        setAnnounceZipCode('');
+      } else {
+        setAnnouncementMsg(`❌ ${data.error || 'Failed to announce availability'}`);
+      }
+    } catch {
+      setAnnouncementMsg('❌ Failed to announce availability');
+    } finally {
+      setAnnouncementLoading(false);
+    }
+  };
 
   // Fetch broadcast jobs + provider info
   const fetchJobs = async () => {
@@ -522,7 +606,15 @@ export default function ProDashboard() {
                   <div>
                     <h3 style={{ fontSize: 16, fontWeight: 700 }}>📍 {job.address || job.zipCode}</h3>
                     <p style={{ fontSize: 13, color: '#94a3b8' }}>{job.serviceType?.replace('_', ' ')} — {job.tier}</p>
-                    {job.customer?.name && <p style={{ fontSize: 12, color: '#64748b' }}>Customer: {job.customer.name}</p>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                      <span style={{ fontSize: 12, color: '#64748b' }}>Customer: {job.customer?.name || 'Assigned'}</span>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setActiveChatJobId(job.id); }}
+                        style={{ padding: '4px 10px', borderRadius: 6, background: '#1e293b', color: '#34d399', border: '1px solid #334155', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                      >
+                        💬 Chat
+                      </button>
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 20, fontWeight: 800, color: '#34d399' }}>${job.providerPayout || job.price}</div>
@@ -817,6 +909,76 @@ export default function ProDashboard() {
         {/* ── PROFILE TAB ── */}
         {tab === 'profile' && providerInfo && (
           <div>
+            {/* Announce Availability Panel */}
+            <div style={{ background: '#1e293b', borderRadius: 16, padding: 24, border: '1px solid #334155', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, marginBottom: 6, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                ⚡ Announce Nearby Availability
+              </h3>
+              <p style={{ fontSize: 12, color: '#94a3b8', margin: 0, marginBottom: 16 }}>
+                Announce you are active in a specific zip code right now so local customers can route jobs to you instantly.
+              </p>
+
+              {announcementMsg && (
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  fontSize: '12px',
+                  background: announcementMsg.startsWith('✅') ? '#052e16' : '#450a0a',
+                  color: announcementMsg.startsWith('✅') ? '#34d399' : '#fca5a5',
+                  marginBottom: '14px',
+                  border: announcementMsg.startsWith('✅') ? '1px solid #065f46' : '1px solid #991b1b',
+                }}>
+                  {announcementMsg}
+                </div>
+              )}
+
+              <form onSubmit={submitAnnouncement} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '10px', alignItems: 'end' }}>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Zip Code</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 67901"
+                    value={announceZipCode}
+                    onChange={(e) => setAnnounceZipCode(e.target.value)}
+                    style={{ width: '100%', padding: '10px 14px', marginTop: 4, borderRadius: 10, border: '1px solid #334155', background: '#0f172a', color: '#fff', fontSize: 14 }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Duration</label>
+                  <select
+                    value={announceHours}
+                    onChange={(e) => setAnnounceHours(e.target.value)}
+                    style={{ width: '100%', padding: '10px 14px', marginTop: 4, borderRadius: 10, border: '1px solid #334155', background: '#0f172a', color: '#fff', fontSize: 14 }}
+                  >
+                    <option value="1">1 hour</option>
+                    <option value="2">2 hours</option>
+                    <option value="4">4 hours</option>
+                    <option value="8">8 hours</option>
+                    <option value="12">12 hours</option>
+                    <option value="24">24 hours</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  disabled={announcementLoading || !announceZipCode.trim()}
+                  style={{
+                    padding: '12px 20px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: '#0284c7',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    opacity: announcementLoading || !announceZipCode.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {announcementLoading ? 'Announcing...' : 'Broadcast'}
+                </button>
+              </form>
+            </div>
+
             <div style={{ background: '#1e293b', borderRadius: 16, padding: 24, border: '1px solid #334155', marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>👤 Business Profile</h3>
@@ -927,6 +1089,202 @@ export default function ProDashboard() {
           </div>
         )}
       </div>
+      {activeChatJobId && providerInfo?.userId && (
+        <ChatDrawer jobId={activeChatJobId} onClose={() => setActiveChatJobId(null)} currentUserId={providerInfo.userId} />
+      )}
+    </div>
+  );
+}
+
+// Chat Drawer Component for Provider (Dark themed to match pro app)
+function ChatDrawer({ jobId, onClose, currentUserId }: { jobId: string; onClose: () => void; currentUserId: string }) {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const chatEndRef = React.useRef<HTMLDivElement>(null);
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/chat`);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch chat messages:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId]);
+
+  useEffect(() => {
+    fetchMessages();
+    const interval = setInterval(fetchMessages, 3000);
+    return () => clearInterval(interval);
+  }, [fetchMessages]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || sending) return;
+
+    setSending(true);
+    const text = inputText;
+    setInputText('');
+
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: text }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMessages((prev) => [...prev, data.message]);
+      } else {
+        setInputText(text);
+      }
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      setInputText(text);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      width: '100%',
+      maxWidth: '420px',
+      background: '#1e293b',
+      boxShadow: '-10px 0 30px rgba(0,0,0,0.5)',
+      zIndex: 1000,
+      display: 'flex',
+      flexDirection: 'column',
+      borderLeft: '1px solid #334155',
+    }}>
+      <div style={{
+        padding: '16px 20px',
+        borderBottom: '1px solid #334155',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: '#0f172a',
+      }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#fff' }}>Customer Messages</h3>
+          <span style={{ fontSize: 11, color: '#94a3b8' }}>Active Chat</span>
+        </div>
+        <button onClick={onClose} style={{
+          background: 'transparent',
+          border: 'none',
+          fontSize: 20,
+          cursor: 'pointer',
+          color: '#94a3b8',
+          padding: 4,
+        }}>✕</button>
+      </div>
+
+      <div style={{
+        flex: 1,
+        padding: '20px',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+      }}>
+        {loading ? (
+          <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading chat...</p>
+        ) : messages.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#94a3b8', margin: 'auto 0', fontSize: 13 }}>
+            <span style={{ fontSize: 32 }}>💬</span>
+            <p style={{ marginTop: 8 }}>No messages yet. Send a message to start chatting!</p>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            const isMe = msg.senderId === currentUserId;
+            return (
+              <div key={msg.id} style={{
+                alignSelf: isMe ? 'flex-end' : 'flex-start',
+                maxWidth: '75%',
+                display: 'flex',
+                flexDirection: 'column',
+              }}>
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: isMe ? '16px 16px 0 16px' : '16px 16px 16px 0',
+                  background: isMe ? '#059669' : '#0f172a',
+                  color: '#fff',
+                  fontSize: '14px',
+                  lineHeight: '1.4',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                  wordBreak: 'break-word',
+                  border: isMe ? 'none' : '1px solid #334155',
+                }}>
+                  {msg.content}
+                </div>
+                <span style={{
+                  fontSize: '9px',
+                  color: '#64748b',
+                  marginTop: '4px',
+                  alignSelf: isMe ? 'flex-end' : 'flex-start',
+                }}>
+                  {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            );
+          })
+        )}
+        <div ref={chatEndRef} />
+      </div>
+
+      <form onSubmit={handleSendMessage} style={{
+        padding: '16px 20px calc(16px + env(safe-area-inset-bottom))',
+        background: '#0f172a',
+        borderTop: '1px solid #334155',
+        display: 'flex',
+        gap: '8px',
+      }}>
+        <input
+          type="text"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          placeholder="Type your message..."
+          disabled={sending}
+          style={{
+            flex: 1,
+            padding: '12px 16px',
+            borderRadius: '12px',
+            border: '1px solid #334155',
+            outline: 'none',
+            fontSize: '14px',
+            fontFamily: 'inherit',
+            background: '#1e293b',
+            color: '#fff',
+          }}
+        />
+        <button type="submit" disabled={sending || !inputText.trim()} style={{
+          padding: '0 18px',
+          borderRadius: '12px',
+          border: 'none',
+          background: '#059669',
+          color: '#fff',
+          fontWeight: 700,
+          cursor: 'pointer',
+          opacity: sending || !inputText.trim() ? 0.6 : 1,
+          transition: 'all 0.2s',
+        }}>
+          Send
+        </button>
+      </form>
     </div>
   );
 }

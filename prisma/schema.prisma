@@ -48,6 +48,8 @@ model User {
   tipsGiven             Tip[]                  @relation("TipGiver")
   notifications         Notification[]
   notificationPrefs     NotificationPreference?
+  sentMessages          Message[]              @relation("SentMessages")
+  pushSubscriptions     PushSubscription[]
 }
 
 // ── Providers (Pro Profiles) ────────────────────────────────────────
@@ -120,6 +122,7 @@ model Provider {
   reviews  Review[] @relation("ReviewSubject")
   tips     Tip[]    @relation("TipReceiver")
   vetosReceived Veto[] @relation("VetoedProvider")
+  announcements NeighborhoodAnnouncement[]
 }
 
 // ── Jobs ────────────────────────────────────────────────────────────
@@ -205,6 +208,16 @@ model Job {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  // Telemetry Coordinates
+  providerLocLat   Float?    // Live provider latitude tracking
+  providerLocLng   Float?    // Live provider longitude tracking
+
+  // Disputes
+  disputedAt       DateTime?
+  disputeReason    String?
+  disputePhotoUrl  String?
+  disputeStatus    String?   // pending | resolved_refunded | resolved_rejected
+
   // Relations
   customer      User           @relation("CustomerJobs", fields: [customerId], references: [id])
   provider      Provider?      @relation("ProviderJobs", fields: [providerId], references: [id])
@@ -213,6 +226,7 @@ model Job {
   tip           Tip?
   notifications Notification[]
   vetos         Veto[]
+  messages      Message[]
 }
 
 // ── Claims (The "Race") ─────────────────────────────────────────────
@@ -386,5 +400,50 @@ model PayoutRecord {
 
   @@index([providerId, createdAt])
   @@index([status])
+}
+
+// ── Message (Chat Room per Job) ─────────────────────────────────────
+model Message {
+  id        String   @id @default(cuid())
+  jobId     String
+  senderId  String
+  content   String
+  createdAt DateTime @default(now())
+  isRead    Boolean  @default(false)
+
+  // Relations
+  job    Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sender User @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+}
+
+// ── Neighborhood Availability Announcement ─────────────────────────
+model NeighborhoodAnnouncement {
+  id         String   @id @default(cuid())
+  providerId String
+  zipCode    String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  // Relations
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([zipCode, expiresAt])
+}
+
+// ── Web Push Subscriptions ──────────────────────────────────────────
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  auth      String
+  p256dh    String
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 

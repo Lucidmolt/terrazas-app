@@ -25,11 +25,12 @@ interface EscrowSummary {
 }
 
 export default function AdminPanel() {
-  const [tab, setTab] = useState<'providers' | 'jobs' | 'escrow'>('providers');
+  const [tab, setTab] = useState<'providers' | 'jobs' | 'escrow' | 'disputes'>('providers');
   const [providers, setProviders] = useState<Provider[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [escrowHolds, setEscrowHolds] = useState<EscrowHold[]>([]);
   const [escrowSummary, setEscrowSummary] = useState<EscrowSummary | null>(null);
+  const [disputes, setDisputes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [filter, setFilter] = useState('pending_review');
@@ -38,12 +39,13 @@ export default function AdminPanel() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [pRes, jRes, eRes] = await Promise.all([
-        fetch('/api/admin/providers'), fetch('/api/admin/jobs'), fetch('/api/admin/escrow'),
+      const [pRes, jRes, eRes, dRes] = await Promise.all([
+        fetch('/api/admin/providers'), fetch('/api/admin/jobs'), fetch('/api/admin/escrow'), fetch('/api/admin/disputes'),
       ]);
       if (pRes.ok) { const d = await pRes.json(); setProviders(d.providers || []); }
       if (jRes.ok) { const d = await jRes.json(); setJobs(d.jobs || []); }
       if (eRes.ok) { const d = await eRes.json(); setEscrowHolds(d.holds || []); setEscrowSummary(d.summary || null); }
+      if (dRes.ok) { const d = await dRes.json(); setDisputes(d.disputes || []); }
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -92,6 +94,12 @@ export default function AdminPanel() {
               ...(tab === 'escrow' ? {} : { background: '#fffbeb', color: '#92400e' }),
             }} onClick={() => setTab('escrow')}>
               🔒 Escrow {escrowSummary ? `($${escrowSummary.totalHeld})` : ''}
+            </button>
+            <button style={{
+              ...btnS(tab === 'disputes'),
+              ...(tab === 'disputes' ? {} : { background: '#fef2f2', color: '#991b1b' }),
+            }} onClick={() => setTab('disputes')}>
+              ⚠️ Disputes ({disputes.length})
             </button>
           </div>
         </div>
@@ -272,6 +280,118 @@ export default function AdminPanel() {
                       )}
                     </div>
                   ))}
+                </div>
+              );
+            })}
+          </>
+        )}
+
+        {/* ── DISPUTES RESOLUTION TAB ── */}
+        {tab === 'disputes' && (
+          <>
+            {loading ? <p>Loading...</p> : disputes.length === 0 ? (
+              <div style={{ ...card, textAlign: 'center', padding: '40px 20px' }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>🛡️</div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#475569' }}>No pending disputes</h3>
+                <p style={{ fontSize: 13, color: '#94a3b8' }}>Disputed jobs will show up here for resolution.</p>
+              </div>
+            ) : disputes.map(dispute => {
+              return (
+                <div key={dispute.id} style={card}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: 10, marginBottom: 12 }}>
+                    <div>
+                      <span style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, background: dispute.disputeStatus === 'pending' ? '#fef3c7' : dispute.disputeStatus === 'pending_flagged' ? '#fee2e2' : '#f1f5f9', color: dispute.disputeStatus === 'pending_flagged' ? '#991b1b' : dispute.disputeStatus === 'pending' ? '#92400e' : '#475569', fontWeight: 700 }}>
+                        ⚠️ {dispute.disputeStatus?.toUpperCase()}
+                      </span>
+                      {dispute.disputeStatus === 'pending_flagged' && (
+                        <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 'bold', marginLeft: 8 }}>⚠️ High Dispute Rate (Abuse Flagged)</span>
+                      )}
+                      <h4 style={{ fontSize: 15, fontWeight: 700, margin: '6px 0 0 0' }}>Job ID: {dispute.id.slice(0, 8)}… · {dispute.serviceType}</h4>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: '#059669' }}>${dispute.customerTotal}</div>
+                      <div style={{ fontSize: 11, color: '#94a3b8' }}>Disputed {dispute.disputedAt ? new Date(dispute.disputedAt).toLocaleDateString() : ''}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, fontSize: 13, marginBottom: 12 }}>
+                    <div>
+                      <strong>Customer:</strong> {dispute.customer?.name || 'Unknown'}
+                      <div style={{ color: '#475569', marginTop: 4, background: '#f8fafc', padding: 8, borderRadius: 8, fontStyle: 'italic' }}>
+                        &ldquo;{dispute.disputeReason}&rdquo;
+                      </div>
+                    </div>
+                    <div>
+                      <strong>Provider:</strong> {dispute.provider?.businessName || 'Unassigned'}
+                      <div style={{ color: '#475569', marginTop: 4 }}>
+                        Status before completion: {dispute.status}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Photo Evidence Side-by-Side */}
+                  <div style={{ margin: '12px 0', borderTop: '1px solid #f1f5f9', paddingTop: 12 }}>
+                    <strong>Evidence Photos:</strong>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Customer Claim Photo</div>
+                        {dispute.disputePhotoUrl ? (
+                          <img src={dispute.disputePhotoUrl} alt="Customer Evidence" style={{ width: '100%', maxHeight: '180px', borderRadius: '8px', objectFit: 'cover', border: '1px solid #cbd5e1' }} />
+                        ) : (
+                          <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f1f5f9', borderRadius: '8px', color: '#94a3b8', fontSize: 12 }}>No photo evidence</div>
+                        )}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Provider Completion Photo</div>
+                        {dispute.photoAfterUrl ? (
+                          <img src={dispute.photoAfterUrl} alt="Provider Completion" style={{ width: '100%', maxHeight: '180px', borderRadius: '8px', objectFit: 'cover', border: '1px solid #cbd5e1' }} />
+                        ) : (
+                          <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f1f5f9', borderRadius: '8px', color: '#94a3b8', fontSize: 12 }}>No completion photo</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {(dispute.disputeStatus === 'pending' || dispute.disputeStatus === 'pending_flagged') && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                      <button 
+                        disabled={actionLoading} 
+                        onClick={async () => {
+                          if (confirm(`Approve dispute and refund customer $${dispute.customerTotal}?`)) {
+                            setActionLoading(true);
+                            await fetch(`/api/admin/disputes`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ jobId: dispute.id, action: 'refund' }),
+                            });
+                            await fetchData();
+                            setActionLoading(false);
+                          }
+                        }} 
+                        style={{ flex: 1, padding: 10, borderRadius: 8, border: 'none', background: '#059669', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Refund Customer
+                      </button>
+                      <button 
+                        disabled={actionLoading} 
+                        onClick={async () => {
+                          if (confirm('Reject dispute and release escrow funds to provider?')) {
+                            setActionLoading(true);
+                            await fetch(`/api/admin/disputes`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ jobId: dispute.id, action: 'reject' }),
+                            });
+                            await fetchData();
+                            setActionLoading(false);
+                          }
+                        }} 
+                        style={{ flex: 1, padding: 10, borderRadius: 8, border: '1px solid #ef4444', background: '#fff', color: '#ef4444', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Reject Dispute (Release Funds)
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

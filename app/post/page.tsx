@@ -34,6 +34,7 @@ export default function PostJobPage() {
   const [pricing, setPricing] = useState<any>(null);
   const [photos, setPhotos] = useState<{ front?: string; back?: string; extra?: string }>({});
   const [uploading, setUploading] = useState(false);
+  const [providerId, setProviderId] = useState<string | null>(null);
 
   // Address Autocomplete states
   const [addressInput, setAddressInput] = useState('');
@@ -63,6 +64,12 @@ export default function PostJobPage() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const scan = params.get('scan');
+      const proId = params.get('providerId');
+      
+      if (proId) {
+        setProviderId(proId);
+      }
+      
       let score: number | null = null;
       if (scan) {
         score = parseFloat(scan);
@@ -192,6 +199,7 @@ export default function PostJobPage() {
           latitude: form.latitude,
           longitude: form.longitude,
           placeId: form.placeId,
+          providerId: providerId || undefined,
         }),
       });
       const data = await res.json();

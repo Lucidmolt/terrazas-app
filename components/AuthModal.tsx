@@ -10,9 +10,10 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialView?: 'choose' | 'signin' | 'signup';
+  initialRole?: 'customer' | 'pro';
 }
 
-export default function AuthModal({ isOpen, onClose, initialView = 'choose' }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, initialView = 'choose', initialRole }: AuthModalProps) {
   const router = useRouter();
   const supabase = createClient();
 
@@ -31,13 +32,18 @@ export default function AuthModal({ isOpen, onClose, initialView = 'choose' }: A
   useEffect(() => {
     if (isOpen) {
       setView(initialView);
+      if (initialRole) {
+        setRole(initialRole);
+      } else {
+        setRole('customer');
+      }
       setEmail('');
       setError('');
       setMessage('');
       setOtp(['', '', '', '', '', '']);
       setLoading(false);
     }
-  }, [isOpen, initialView]);
+  }, [isOpen, initialView, initialRole]);
 
   // Close on Escape
   useEffect(() => {
