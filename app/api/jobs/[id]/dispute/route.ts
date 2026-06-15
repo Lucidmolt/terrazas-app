@@ -59,6 +59,25 @@ export async function POST(
 
     const isHighDisputeRate = totalCustomerJobs >= 3 && (totalCustomerDisputes / totalCustomerJobs) > 0.15;
 
+    // Deduct payout from provider's balance to suspend it in escrow pending review
+    if (job.providerId) {
+      const provider = await db.provider.findUnique({ where: { id: job.providerId } });
+      if (provider) {
+        const payoutAmount = job.providerPayout > 0 ? job.providerPayout : job.price * 0.85;
+        if (provider.pendingPayout >= payoutAmount) {
+          await db.provider.update({
+            where: { id: job.providerId },
+            data: { pendingPayout: { decrement: payoutAmount } },
+          });
+        } else {
+          await db.provider.update({
+            where: { id: job.providerId },
+            data: { availablePayout: { decrement: payoutAmount } },
+          });
+        }
+      }
+    }
+
     // Save dispute details
     const updatedJob = await db.job.update({
       where: { id: jobId },

@@ -42,9 +42,14 @@ export async function PATCH(request: Request) {
     if (photoBeforeUrl) updateData.photoBeforeUrl = photoBeforeUrl;
     if (photoAfterUrl) updateData.photoAfterUrl = photoAfterUrl;
 
-    // Set completion timestamp
-    if (status === 'completed') {
+    // Set completion timestamp and record earnings
+    if (status === 'completed' && job.status !== 'completed') {
       updateData.completedAt = new Date();
+      if (job.providerId) {
+        const { recordJobEarnings } = await import('@/lib/payouts');
+        const payoutAmount = job.providerPayout > 0 ? job.providerPayout : job.price * 0.85;
+        await recordJobEarnings(job.providerId, job.id, payoutAmount);
+      }
     }
 
     const updatedJob = await db.job.update({

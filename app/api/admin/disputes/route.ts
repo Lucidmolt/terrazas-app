@@ -63,6 +63,15 @@ export async function POST(request: Request) {
       refundResult = await refundJobPayment(job.paymentIntentId);
     }
 
+    // If dispute is rejected (dismissed), release the held payout to the provider
+    if (action === 'reject' && job.providerId) {
+      const payoutAmount = job.providerPayout > 0 ? job.providerPayout : job.price * 0.85;
+      await db.provider.update({
+        where: { id: job.providerId },
+        data: { availablePayout: { increment: payoutAmount } },
+      });
+    }
+
     // Update job dispute status
     const updatedJob = await db.job.update({
       where: { id: jobId },
