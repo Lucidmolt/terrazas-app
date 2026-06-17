@@ -167,6 +167,33 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── Duplicate Broadcast Guard (Idempotency) ──
+    const targetAddress = address || `Service in ${zipCode}`;
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    const existingJob = await db.job.findFirst({
+      where: {
+        customerId,
+        serviceType: serviceType || 'mowing',
+        tier: tier || 'basic',
+        address: targetAddress,
+        createdAt: { gte: twoMinutesAgo },
+        status: {
+          in: ['broadcast', 'pending_claim', 'pending_approval', 'active', 'en_route', 'in_progress'],
+        },
+      },
+    });
+
+    if (existingJob) {
+      return NextResponse.json(
+        {
+          error: 'DUPLICATE_BROADCAST',
+          message: 'You have already posted an identical job request in the last 2 minutes. Please check your active jobs.',
+          jobId: existingJob.id,
+        },
+        { status: 409 }
+      );
+    }
+
     // ── Dynamic Pricing ──
     const pricing = await calculateDynamicPrice({
       tier: tier || 'basic',
