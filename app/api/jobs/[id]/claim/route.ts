@@ -19,7 +19,7 @@ export async function POST(
   const { id: jobId } = await params;
 
   try {
-    const { etaMinutes } = await request.json();
+    const { etaMinutes, quotePrice } = await request.json();
 
     // Use the authenticated provider's ID — not from request body
     const providerId = authProvider!.id;
@@ -99,20 +99,24 @@ export async function POST(
       );
     }
 
-    // ── ATOMIC LOCK: Single UPDATE with WHERE status='broadcast' ──
+    // ── ATOMIC LOCK: Single UPDATE with WHERE status='broadcast' or status='pending_claim' ──
     const now = new Date();
     const approvalDeadline = new Date(now.getTime() + 10 * 60 * 1000);
 
     const lockResult = await db.job.updateMany({
       where: {
         id: jobId,
-        status: 'broadcast', // ← This is the atomic guard
+        OR: [
+          { status: 'broadcast' },
+          { status: 'pending_claim', providerId: providerId },
+        ],
       },
       data: {
         status: 'pending_approval',
         providerId,
         pendingProId: providerId,
         etaMinutes: etaMinutes || 30,
+        quotedPrice: quotePrice ? parseFloat(quotePrice) : null,
         claimedAt: now,
         approvalDeadline,
       },

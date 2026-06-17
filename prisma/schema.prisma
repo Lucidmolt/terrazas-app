@@ -191,6 +191,8 @@ model Job {
   broadcastTier    Int       @default(1)  // 0=preferred, 1=local_zip, 2=global
   escalatedAt      DateTime?              // When last escalation occurred
   preferredProId   String?                // Customer's preferred provider (tier 0)
+  quotedPrice      Float?                 // Temporary custom quote price from claiming pro
+
 
   // ── Veto / Approval ──
   blockedProviders String    @default("[]") // JSON array of vetoed provider IDs

@@ -78,16 +78,30 @@ export async function GET(request: Request) {
 
     const where: any = {};
 
-    // Support comma-separated statuses: ?status=active,en_route
-    if (status) {
-      const statuses = status.split(',').map(s => s.trim());
-      where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
-    }
-    if (zip) where.zipCode = zip;
-
     // M1 FIX: Scope queries to the authenticated user's own data
     const viewerRole = dbUser?.role || 'customer';
     const viewerId = dbUser?.id;
+
+    let provider = null;
+    if (viewerRole === 'pro' && viewerId) {
+      provider = await db.provider.findUnique({ where: { userId: viewerId } });
+    }
+
+    // Support comma-separated statuses: ?status=active,en_route
+    if (status) {
+      const statuses = status.split(',').map(s => s.trim());
+      if (viewerRole === 'pro' && provider && statuses.includes('broadcast')) {
+        const otherStatuses = statuses.filter(s => s !== 'broadcast');
+        where.OR = [
+          { status: 'broadcast' },
+          { status: 'pending_claim', providerId: provider.id },
+          ...(otherStatuses.length > 0 ? [{ status: { in: otherStatuses } }] : [])
+        ];
+      } else {
+        where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
+      }
+    }
+    if (zip) where.zipCode = zip;
 
     if (viewerRole === 'customer') {
       // Customers only see their own jobs + broadcast jobs

@@ -36,14 +36,27 @@ export async function POST(
       });
     }
 
+    const updateData: any = {
+      status: 'active',
+      approvedAt: new Date(),
+      autoApproved: false,
+      quotedPrice: null,
+    };
+
+    if (job.quotedPrice && job.quotedPrice > 0) {
+      const { calculatePricing } = await import('@/lib/constants');
+      const pricing = calculatePricing(job.quotedPrice, 0);
+      updateData.price = pricing.jobPrice;
+      updateData.serviceFee = pricing.serviceFee;
+      updateData.processingFee = pricing.processingFee;
+      updateData.customerTotal = pricing.customerTotal;
+      updateData.providerPayout = pricing.providerPayout;
+    }
+
     // Approve the job
     const updatedJob = await db.job.update({
       where: { id: jobId },
-      data: {
-        status: 'active',
-        approvedAt: new Date(),
-        autoApproved: false,
-      },
+      data: updateData,
     });
 
     return NextResponse.json({

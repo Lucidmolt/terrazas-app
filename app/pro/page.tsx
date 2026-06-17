@@ -7,6 +7,11 @@ interface JobItem {
   address: string; price: number; providerPayout: number; customerTotal: number;
   aiWarning: boolean; conditionNotes: string | null; createdAt: string;
   completedAt?: string; cancelledAt?: string;
+  photoFrontUrl: string | null;
+  photoBackUrl: string | null;
+  photoExtraUrl: string | null;
+  photoAfterUrl: string | null;
+  quotedPrice?: number | null;
   customer?: { name: string | null };
   review?: { rating: number; comment: string | null } | null;
   tip?: { amount: number; status: string } | null;
@@ -68,6 +73,7 @@ export default function ProDashboard() {
   const [announceZipCode, setAnnounceZipCode] = useState('');
   const [announceHours, setAnnounceHours] = useState('2');
   const [announcementMsg, setAnnouncementMsg] = useState('');
+  const [customQuotes, setCustomQuotes] = useState<Record<string, string>>({});
   const [announcementLoading, setAnnouncementLoading] = useState(false);
 
   // Geolocation watch telemetry for active jobs that are en_route
@@ -227,10 +233,14 @@ export default function ProDashboard() {
 
   const claimJob = async (jobId: string) => {
     setClaiming(jobId);
+    const customPrice = customQuotes[jobId] ? parseFloat(customQuotes[jobId]) : undefined;
     try {
       const res = await fetch(`/api/jobs/${jobId}/claim`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ etaMinutes: selectedEta[jobId] || 30 }),
+        body: JSON.stringify({
+          etaMinutes: selectedEta[jobId] || 30,
+          quotePrice: customPrice
+        }),
       });
       const data = await res.json();
       if (!data.success && !res.ok) alert(data.error || 'Job unavailable');
@@ -552,14 +562,51 @@ export default function ProDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                   <div>
                     <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: '#059669', color: '#fff', fontWeight: 700 }}>{statusInfo.label}</span>
+                    {job.status === 'pending_claim' && (
+                      <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: '#38bdf8', color: '#0f172a', fontWeight: 800, marginLeft: 8 }}>⭐ Direct Offer</span>
+                    )}
                     <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 8 }}>{job.serviceType?.replace('_', ' ')} — {job.tier}</h3>
                     <p style={{ fontSize: 13, color: '#94a3b8' }}>📍 {job.address || job.zipCode}</p>
+                    
+                    {/* Job Photos */}
+                    {(job.photoFrontUrl || job.photoBackUrl) && (
+                      <div style={{ display: 'flex', gap: 10, marginTop: 12, marginBottom: 12 }}>
+                        {job.photoFrontUrl && (
+                          <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
+                            <img src={job.photoFrontUrl} alt="Front Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        )}
+                        {job.photoBackUrl && (
+                          <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
+                            <img src={job.photoBackUrl} alt="Back Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 28, fontWeight: 900, color: '#34d399' }}>${job.providerPayout || job.price}</div>
                     <div style={{ fontSize: 10, color: '#64748b' }}>YOUR PAYOUT</div>
                   </div>
                 </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
+                    CUSTOM QUOTE PRICE (OPTIONAL)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', background: '#0f172a', border: '1px solid #334155', borderRadius: 10, padding: '4px 12px' }}>
+                    <span style={{ color: '#94a3b8', fontSize: 14, marginRight: 4 }}>$</span>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      placeholder={String(job.price)} 
+                      value={customQuotes[job.id] || ''} 
+                      onChange={(e) => setCustomQuotes(prev => ({ ...prev, [job.id]: e.target.value }))}
+                      style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 14, width: '100%', outline: 'none' }}
+                    />
+                  </div>
+                </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
                   {[15, 30, 45].map(min => (
                     <button key={min} onClick={() => setSelectedEta(p => ({ ...p, [job.id]: min }))}
@@ -615,6 +662,22 @@ export default function ProDashboard() {
                         💬 Chat
                       </button>
                     </div>
+
+                    {/* Job Photos */}
+                    {(job.photoFrontUrl || job.photoBackUrl) && (
+                      <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                        {job.photoFrontUrl && (
+                          <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
+                            <img src={job.photoFrontUrl} alt="Front Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        )}
+                        {job.photoBackUrl && (
+                          <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
+                            <img src={job.photoBackUrl} alt="Back Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 20, fontWeight: 800, color: '#34d399' }}>${job.providerPayout || job.price}</div>
@@ -822,6 +885,13 @@ export default function ProDashboard() {
                     <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 6 }}>{job.serviceType?.replace('_', ' ')} — {job.tier}</h3>
                     <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>📍 {job.address || job.zipCode}</p>
                     {job.customer?.name && <p style={{ fontSize: 11, color: '#64748b', margin: 0 }}>Customer: {job.customer.name}</p>}
+                    
+                    {/* Completion Photo */}
+                    {job.photoAfterUrl && (
+                      <div style={{ marginTop: 12, borderRadius: 10, overflow: 'hidden', border: '1px solid #334155', height: 120, maxWidth: 200 }}>
+                        <img src={job.photoAfterUrl} alt="Completed Work" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                    )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 20, fontWeight: 800, color: job.status === 'completed' ? '#34d399' : '#64748b' }}>${job.providerPayout || job.price}</div>

@@ -1,5 +1,7 @@
 'use client';
 import React, { useState, useCallback, useEffect } from 'react';
+import AuthModal from '@/components/AuthModal';
+import { createClient } from '@/lib/supabase-browser';
 
 const SCOPE_OPTIONS = [
   { value: 'front_only', label: 'Front yard only', mult: '0.6x', icon: '🏠' },
@@ -36,6 +38,12 @@ export default function PostJobPage() {
   const [uploading, setUploading] = useState(false);
   const [providerId, setProviderId] = useState<string | null>(null);
 
+  // Auth states
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [shouldSubmitAfterAuth, setShouldSubmitAfterAuth] = useState(false);
+  const [supabase] = useState(() => createClient());
+
   // Address Autocomplete states
   const [addressInput, setAddressInput] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -59,12 +67,15 @@ export default function PostJobPage() {
     conditionScore: 5,
   });
 
-  // Check for scan query parameter or local storage on mount
+  // Check for query parameters or local storage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const scan = params.get('scan');
       const proId = params.get('providerId');
+      const zip = params.get('zip');
+      const tier = params.get('tier');
+      const addr = params.get('address');
       
       if (proId) {
         setProviderId(proId);
@@ -80,12 +91,42 @@ export default function PostJobPage() {
           score = parseFloat(stored);
         }
       }
+
+      setForm(f => ({
+        ...f,
+        zipCode: zip || f.zipCode,
+        tier: tier || f.tier,
+        address: addr || f.address,
+        conditionScore: score !== null ? score : f.conditionScore,
+      }));
+
+      if (addr) {
+        setAddressInput(addr);
+      }
       if (score !== null) {
         setScanScore(score);
-        setForm(f => ({ ...f, conditionScore: score! }));
       }
     }
   }, []);
+
+  // Listen for Auth State Changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuthenticated(!!session);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session);
+    });
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  // Submit automatically if logged in successfully after prompting
+  useEffect(() => {
+    if (isAuthenticated && shouldSubmitAfterAuth) {
+      setShouldSubmitAfterAuth(false);
+      submitJob();
+    }
+  }, [isAuthenticated, shouldSubmitAfterAuth]);
 
   const set = (key: string, value: any) => setForm(f => ({ ...f, [key]: value }));
   const toggleExtra = (key: string) => set('extras', form.extras.includes(key) ? form.extras.filter(e => e !== key) : [...form.extras, key]);
@@ -179,6 +220,11 @@ export default function PostJobPage() {
 
   // Submit job
   const submitJob = async () => {
+    if (!isAuthenticated) {
+      setShouldSubmitAfterAuth(true);
+      setAuthModalOpen(true);
+      return;
+    }
     setLoading(true); setError('');
     try {
       const res = await fetch('/api/jobs', {
@@ -787,6 +833,7 @@ export default function PostJobPage() {
           </button>
         </div>
       )}
+      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </div>
   );
 }

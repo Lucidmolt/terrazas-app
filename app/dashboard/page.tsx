@@ -8,6 +8,14 @@ interface Job {
   price: number; customerTotal: number; providerPayout: number; serviceFee: number;
   createdAt: string; claimedAt: string | null; approvedAt: string | null; completedAt: string | null;
   approvalDeadline: string | null; autoApproved: boolean; vetoCount: number;
+  photoFrontUrl: string | null;
+  photoBackUrl: string | null;
+  photoExtraUrl: string | null;
+  photoAfterUrl: string | null;
+  quotedPrice: number | null;
+  serviceType: string;
+  tier: string;
+  customerNotes: string | null;
   provider?: { id: string; businessName: string; logoUrl: string | null; rating: number; reviewCount: number; bio: string | null; portfolioPhotos: string; isVerified: boolean; };
   providerLocLat?: number | null;
   providerLocLng?: number | null;
@@ -524,7 +532,18 @@ export default function Dashboard() {
                   {/* Status badge */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <span style={{ padding: '4px 10px', borderRadius: 6, background: status.bg, color: status.text, fontSize: 12, fontWeight: 700 }}>{status.label}</span>
-                    <span style={{ fontSize: 18, fontWeight: 800, color: '#059669' }}>${job.customerTotal.toFixed(2)}</span>
+                    <div style={{ textAlign: 'right' }}>
+                      {job.quotedPrice && job.quotedPrice > 0 ? (
+                        <div>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: '#d97706' }}>
+                            ${(job.quotedPrice + Math.max(job.quotedPrice * 0.13, 5.0) + 2.5).toFixed(2)}
+                          </span>
+                          <span style={{ fontSize: 9, color: '#d97706', display: 'block', fontWeight: 700 }}>PRO QUOTE</span>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 18, fontWeight: 800, color: '#059669' }}>${job.customerTotal.toFixed(2)}</span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Address */}
@@ -547,6 +566,19 @@ export default function Dashboard() {
                         </div>
                       </div>
                       {job.provider.bio && <p style={{ fontSize: 13, color: '#475569', marginBottom: 12, lineHeight: 1.5 }}>{job.provider.bio}</p>}
+
+                      {/* Custom quote details */}
+                      {job.quotedPrice && job.quotedPrice > 0 && (
+                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '12px 14px', marginBottom: 12, fontSize: 12, color: '#b45309', fontWeight: 700, textAlign: 'left' }}>
+                          💰 Provider submitted a custom price quote:
+                          <div style={{ fontSize: 15, marginTop: 4, color: '#b45309', fontWeight: 800 }}>
+                            ${job.quotedPrice.toFixed(2)} payout (${(job.quotedPrice + Math.max(job.quotedPrice * 0.13, 5.0) + 2.5).toFixed(2)} total cost)
+                          </div>
+                          <div style={{ fontSize: 10, fontWeight: 500, color: '#d97706', marginTop: 2 }}>
+                            (Original estimate: ${job.price.toFixed(2)} payout / ${job.customerTotal.toFixed(2)} total)
+                          </div>
+                        </div>
+                      )}
 
                       {/* Countdown timer */}
                       {deadline && <CountdownTimer deadline={deadline} />}
@@ -630,6 +662,62 @@ export default function Dashboard() {
                           ⚠️ {job.disputeStatus.toUpperCase().replace('_', ' ')}
                         </div>
                       ) : null}
+                    </div>
+                  )}
+
+                  {/* Detailed view (expanded on click) */}
+                  {isSelected && (
+                    <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 12 }} onClick={(e) => e.stopPropagation()}>
+                      {/* Before / After comparison if completed */}
+                      {job.status === 'completed' && job.photoAfterUrl ? (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>✨ Before & After comparison</div>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            {job.photoFrontUrl && (
+                              <div style={{ flex: 1, borderRadius: 10, overflow: 'hidden', border: '1px solid #cbd5e1', height: 120 }}>
+                                <img src={job.photoFrontUrl} alt="Before" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                <div style={{ fontSize: 9, background: '#f8fafc', padding: '3px', textAlign: 'center', fontWeight: 700, borderTop: '1px solid #cbd5e1', color: '#475569' }}>BEFORE</div>
+                              </div>
+                            )}
+                            <div style={{ flex: 1, borderRadius: 10, overflow: 'hidden', border: '1px solid #a7f3d0', height: 120 }}>
+                              <img src={job.photoAfterUrl} alt="After" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              <div style={{ fontSize: 9, background: '#ecfdf5', padding: '3px', textAlign: 'center', fontWeight: 800, borderTop: '1px solid #a7f3d0', color: '#059669' }}>AFTER</div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Standard yard photos display */
+                        (job.photoFrontUrl || job.photoBackUrl) && (
+                          <div style={{ marginBottom: 12 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>📸 Uploaded Yard Photos</div>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              {job.photoFrontUrl && (
+                                <div style={{ flex: 1, borderRadius: 10, overflow: 'hidden', border: '1px solid #cbd5e1', height: 100 }}>
+                                  <img src={job.photoFrontUrl} alt="Front Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  <div style={{ fontSize: 9, background: '#f8fafc', padding: '3px', textAlign: 'center', fontWeight: 700, borderTop: '1px solid #cbd5e1', color: '#475569' }}>FRONT</div>
+                                </div>
+                              )}
+                              {job.photoBackUrl && (
+                                <div style={{ flex: 1, borderRadius: 10, overflow: 'hidden', border: '1px solid #cbd5e1', height: 100 }}>
+                                  <img src={job.photoBackUrl} alt="Back Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  <div style={{ fontSize: 9, background: '#f8fafc', padding: '3px', textAlign: 'center', fontWeight: 700, borderTop: '1px solid #cbd5e1', color: '#475569' }}>BACK</div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      )}
+
+                      {/* Job details checklist */}
+                      <div style={{ background: '#f8fafc', borderRadius: 10, padding: 12, fontSize: 12, color: '#475569' }}>
+                        <div><strong>Service Type:</strong> {job.serviceType?.replace('_', ' ').toUpperCase()}</div>
+                        <div style={{ marginTop: 4 }}><strong>Tier:</strong> {job.scope?.replace('_', ' ').toUpperCase()} ({job.tier?.toUpperCase()})</div>
+                        {job.customerNotes && (
+                          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed #cbd5e1' }}>
+                            <strong>Notes:</strong> {job.customerNotes}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 

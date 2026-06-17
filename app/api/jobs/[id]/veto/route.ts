@@ -102,6 +102,7 @@ export async function POST(
         vetoCount: newVetoCount,
         vetoReasons: JSON.stringify(vetoReasons),
         broadcastedAt: newStatus === 'broadcast' ? new Date() : null,
+        quotedPrice: null,
       },
     });
 

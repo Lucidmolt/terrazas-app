@@ -166,65 +166,26 @@ export default function HomePage() {
 
   // ── Confirm Broadcast Order ──────────────────────────────────────
   const confirmBroadcast = useCallback(async () => {
-    setLoading(true);
-    try {
-      const tier = TIERS[selectedTier];
-      const res = await fetch('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: 'demo-customer', // TODO: replace with real auth
-          zipCode: activeZip,
-          address: address || `Service in ${activeZip}`,
-          tier: selectedTier,
-          serviceType: 'mowing',
-          price: tier.basePrice,
-          conditionScore: scanScore !== null ? scanScore : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.job) {
-        setJobId(data.job.id);
-        setView('searching');
-        setCountdown(BROADCAST_WINDOW_SECONDS);
-        setCountdownActive(true);
-      }
-    } catch (err) {
-      console.error('[Terrazas] confirmBroadcast failed:', err);
-    } finally {
-      setLoading(false);
-    }
+    const params = new URLSearchParams({
+      zip: activeZip,
+      tier: selectedTier,
+      address: address || '',
+      ...(scanScore !== null ? { scan: scanScore.toString() } : {}),
+    });
+    window.location.href = `/post?${params.toString()}`;
   }, [activeZip, address, selectedTier, scanScore]);
 
   // ── Select Specific Provider ─────────────────────────────────────
   const selectSpecificPro = useCallback(
     async (provider: ProviderInfo) => {
-      setLoading(true);
-      try {
-        const res = await fetch('/api/jobs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            customerId: 'demo-customer',
-            zipCode: activeZip,
-            address: address || `Service in ${activeZip}`,
-            tier: selectedTier,
-            serviceType: 'mowing',
-            price: TIERS[selectedTier].basePrice,
-            providerId: provider.id,
-            conditionScore: scanScore !== null ? scanScore : undefined,
-          }),
-        });
-        const data = await res.json();
-        if (data.job) {
-          setJobId(data.job.id);
-          setView('success');
-        }
-      } catch (err) {
-        console.error('[Terrazas] selectSpecificPro failed:', err);
-      } finally {
-        setLoading(false);
-      }
+      const params = new URLSearchParams({
+        zip: activeZip,
+        tier: selectedTier,
+        address: address || '',
+        providerId: provider.id,
+        ...(scanScore !== null ? { scan: scanScore.toString() } : {}),
+      });
+      window.location.href = `/post?${params.toString()}`;
     },
     [activeZip, address, selectedTier, scanScore]
   );
