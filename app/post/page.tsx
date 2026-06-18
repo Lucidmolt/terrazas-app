@@ -52,6 +52,10 @@ export default function PostJobPage() {
   // Scan states
   const [scanScore, setScanScore] = useState<number | null>(null);
 
+  // Subscription states
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [frequencyDays, setFrequencyDays] = useState(14);
+
   const [form, setForm] = useState({
     address: '',
     zipCode: '',
@@ -227,7 +231,8 @@ export default function PostJobPage() {
     }
     setLoading(true); setError('');
     try {
-      const res = await fetch('/api/jobs', {
+      const endpoint = isRecurring ? '/api/subscriptions' : '/api/jobs';
+      const res = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           address: form.address,
@@ -246,6 +251,7 @@ export default function PostJobPage() {
           longitude: form.longitude,
           placeId: form.placeId,
           providerId: providerId || undefined,
+          frequencyDays: isRecurring ? frequencyDays : undefined,
         }),
       });
       const data = await res.json();
@@ -739,6 +745,35 @@ export default function PostJobPage() {
                   </div>
                 </div>
               ) : <p style={{ color: '#94a3b8' }}>Recalculating price breakdown...</p>}
+            </div>
+
+            <div style={card}>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>🔁 Recurring Subscription</h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', color: '#1e293b', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={isRecurring}
+                  onChange={(e) => setIsRecurring(e.target.checked)}
+                  style={{ width: '18px', height: '18px', accentColor: '#059669', cursor: 'pointer' }}
+                />
+                Subscribe & save time (automatically schedule future cuts)
+              </label>
+              
+              {isRecurring && (
+                <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>Choose frequency:</span>
+                  <select
+                    value={frequencyDays}
+                    onChange={(e) => setFrequencyDays(parseInt(e.target.value))}
+                    style={{ ...input, padding: '10px' }}
+                  >
+                    <option value={7}>Weekly (Every 7 days)</option>
+                    <option value={10}>Every 10 days</option>
+                    <option value={14}>Bi-weekly (Every 14 days)</option>
+                    <option value={30}>Monthly (Every 30 days)</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <div style={card}>

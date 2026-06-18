@@ -22,6 +22,9 @@ interface Job {
   latitude?: number | null;
   longitude?: number | null;
   disputeStatus?: string | null;
+  qualityScore?: number | null;
+  qualityPassed?: boolean | null;
+  qualityFeedback?: string | null;
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
@@ -59,12 +62,14 @@ const inputStyle: React.CSSProperties = {
 
 export default function Dashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'jobs' | 'profile'>('jobs');
+  const [activeTab, setActiveTab] = useState<'jobs' | 'subscriptions' | 'profile'>('jobs');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [vetoReason, setVetoReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [subscriptions, setSubscriptions] = useState<any[]>([]);
+  const [subsLoading, setSubsLoading] = useState(false);
 
   // Profile settings state
   const [profileName, setProfileName] = useState('');
@@ -200,6 +205,43 @@ export default function Dashboard() {
     }
   }, []);
 
+  const fetchSubscriptions = useCallback(async () => {
+    setSubsLoading(true);
+    try {
+      const res = await fetch('/api/subscriptions');
+      if (res.ok) {
+        const data = await res.json();
+        setSubscriptions(data.subscriptions || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch subscriptions:', err);
+    } finally {
+      setSubsLoading(false);
+    }
+  }, []);
+
+  const cancelSubscription = async (subId: string) => {
+    if (!confirm('Are you sure you want to cancel this recurring subscription?')) return;
+    try {
+      const res = await fetch(`/api/subscriptions?id=${subId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSubscriptions(prev => prev.filter(s => s.id !== subId));
+        alert('Subscription cancelled successfully.');
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to cancel subscription.');
+      }
+    } catch (err) {
+      alert('Failed to cancel subscription.');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'subscriptions') {
+      fetchSubscriptions();
+    }
+  }, [activeTab, fetchSubscriptions]);
+
   useEffect(() => {
     if (profileZipCode) {
       fetchAnnouncements(profileZipCode);
@@ -257,7 +299,7 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, []);
 
-  const handleTabChange = (tab: 'jobs' | 'profile') => {
+  const handleTabChange = (tab: 'jobs' | 'subscriptions' | 'profile') => {
     setActiveTab(tab);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -684,6 +726,17 @@ export default function Dashboard() {
                               <div style={{ fontSize: 9, background: '#ecfdf5', padding: '3px', textAlign: 'center', fontWeight: 800, borderTop: '1px solid #a7f3d0', color: '#059669' }}>AFTER</div>
                             </div>
                           </div>
+                          {job.qualityScore !== null && job.qualityScore !== undefined && (
+                            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '12px', marginTop: 12, borderLeft: job.qualityPassed ? '4px solid #10b981' : '4px solid #f59e0b' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <span style={{ fontSize: 12, fontWeight: 800, color: '#475569' }}>🤖 AI Quality Audit</span>
+                                <span style={{ fontSize: 13, fontWeight: 900, color: job.qualityPassed ? '#10b981' : '#b45309' }}>
+                                  {job.qualityScore}/10 ({job.qualityPassed ? 'PASSED' : 'FLAGGED'})
+                                </span>
+                              </div>
+                              {job.qualityFeedback && <p style={{ fontSize: 12, color: '#64748b', margin: 0, lineHeight: 1.4 }}>{job.qualityFeedback}</p>}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         /* Standard yard photos display */
@@ -774,6 +827,110 @@ export default function Dashboard() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* SUBSCRIPTIONS TAB */}
+        {activeTab === 'subscriptions' && (
+          <div style={{ animation: 'fade-in 0.4s ease-out' }}>
+            <h2 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', marginBottom: 16 }}>Recurring Services</h2>
+            {subsLoading ? (
+              <p style={{ color: '#94a3b8' }}>Loading subscriptions...</p>
+            ) : subscriptions.length === 0 ? (
+              <div style={{ ...card, textAlign: 'center', padding: '40px 20px', background: '#fff' }}>
+                <span style={{ fontSize: 40 }}>🔁</span>
+                <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginTop: 12 }}>No Active Subscriptions</h3>
+                <p style={{ color: '#64748b', fontSize: 13, marginTop: 6, marginBottom: 16 }}>
+                  Subscribe to a recurring plan when booking a job to keep your lawn looking pristine automatically.
+                </p>
+                <a
+                  href="/post"
+                  style={{
+                    display: 'inline-block',
+                    background: '#059669',
+                    color: '#fff',
+                    padding: '12px 24px',
+                    borderRadius: '12px',
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                    fontSize: 14,
+                  }}
+                >
+                  Book Recurring Job
+                </a>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {subscriptions.map((sub) => (
+                  <div key={sub.id} style={{ ...card, background: '#fff', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <span style={{
+                          background: '#ecfdf5',
+                          color: '#059669',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '4px 8px',
+                          borderRadius: '8px',
+                          display: 'inline-block',
+                          marginBottom: '6px'
+                        }}>
+                          ACTIVE · Every {sub.frequencyDays} Days
+                        </span>
+                        <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                          {sub.serviceType.charAt(0).toUpperCase() + sub.serviceType.slice(1)} ({sub.tier.toUpperCase()})
+                        </h3>
+                        <p style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>📍 {sub.address}</p>
+                      </div>
+                      <button
+                        onClick={() => cancelSubscription(sub.id)}
+                        style={{
+                          background: '#fef2f2',
+                          color: '#dc2626',
+                          border: 'none',
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          fontWeight: 600,
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                      gap: '12px',
+                      background: '#f8fafc',
+                      padding: '12px',
+                      borderRadius: '12px',
+                      fontSize: '12px',
+                      color: '#475569',
+                    }}>
+                      <div>
+                        <strong style={{ display: 'block', color: '#64748b' }}>Frequency</strong>
+                        Every {sub.frequencyDays} days
+                      </div>
+                      <div>
+                        <strong style={{ display: 'block', color: '#64748b' }}>Scope</strong>
+                        {sub.scope.replace('_', ' ')}
+                      </div>
+                      <div>
+                        <strong style={{ display: 'block', color: '#64748b' }}>Lot Size</strong>
+                        {sub.lotSize}
+                      </div>
+                      <div>
+                        <strong style={{ display: 'block', color: '#64748b' }}>Next Job Due</strong>
+                        {new Date(sub.nextJobDueDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -969,6 +1126,21 @@ export default function Dashboard() {
           border: activeTab === 'jobs' ? '1px solid #d1fae5' : '1px solid transparent'
         }}>🗓️</button>
         
+        <button onClick={() => handleTabChange('subscriptions')} style={{
+          background: activeTab === 'subscriptions' ? '#f0fdf4' : 'transparent',
+          width: 56,
+          height: 56,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 24,
+          fontSize: 20,
+          cursor: 'pointer',
+          color: activeTab === 'subscriptions' ? '#059669' : '#cbd5e1',
+          transition: 'all 0.2s',
+          border: activeTab === 'subscriptions' ? '1px solid #d1fae5' : '1px solid transparent'
+        }}>🔁</button>
+
         <button onClick={() => handleTabChange('profile')} style={{
           background: activeTab === 'profile' ? '#f0fdf4' : 'transparent',
           width: 56,
@@ -1214,6 +1386,22 @@ function ChatDrawer({ jobId, onClose, currentUserId }: { jobId: string; onClose:
         }}>✕</button>
       </div>
 
+      {/* Safety Warning Banner */}
+      <div style={{
+        padding: '10px 16px',
+        background: '#fffbeb',
+        borderBottom: '1px solid #fef3c7',
+        color: '#b45309',
+        fontSize: '11px',
+        lineHeight: '1.4',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}>
+        <span style={{ fontSize: '14px' }}>🛡️</span>
+        <span>Keep chats and payments here to remain covered by our $1,000 Damage Guarantee.</span>
+      </div>
+
       <div style={{
         flex: 1,
         padding: '20px',
@@ -1231,34 +1419,40 @@ function ChatDrawer({ jobId, onClose, currentUserId }: { jobId: string; onClose:
           </div>
         ) : (
           messages.map((msg) => {
+            const isSystem = msg.senderId === 'system';
             const isMe = msg.senderId === currentUserId;
             return (
               <div key={msg.id} style={{
-                alignSelf: isMe ? 'flex-end' : 'flex-start',
-                maxWidth: '75%',
+                alignSelf: isSystem ? 'center' : (isMe ? 'flex-end' : 'flex-start'),
+                maxWidth: isSystem ? '90%' : '75%',
                 display: 'flex',
                 flexDirection: 'column',
+                margin: isSystem ? '8px 0' : '0',
               }}>
                 <div style={{
                   padding: '10px 14px',
-                  borderRadius: isMe ? '16px 16px 0 16px' : '16px 16px 16px 0',
-                  background: isMe ? '#059669' : '#f1f5f9',
-                  color: isMe ? '#fff' : '#1e293b',
-                  fontSize: '14px',
+                  borderRadius: isSystem ? '12px' : (isMe ? '16px 16px 0 16px' : '16px 16px 16px 0'),
+                  background: isSystem ? '#fffbeb' : (isMe ? '#059669' : '#f1f5f9'),
+                  color: isSystem ? '#78350f' : (isMe ? '#fff' : '#1e293b'),
+                  border: isSystem ? '1px solid #fde68a' : 'none',
+                  fontSize: isSystem ? '12px' : '14px',
                   lineHeight: '1.4',
                   boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                   wordBreak: 'break-word',
+                  textAlign: isSystem ? 'center' : 'left',
                 }}>
                   {msg.content}
                 </div>
-                <span style={{
-                  fontSize: '9px',
-                  color: '#94a3b8',
-                  marginTop: '4px',
-                  alignSelf: isMe ? 'flex-end' : 'flex-start',
-                }}>
-                  {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                {!isSystem && (
+                  <span style={{
+                    fontSize: '9px',
+                    color: '#94a3b8',
+                    marginTop: '4px',
+                    alignSelf: isMe ? 'flex-end' : 'flex-start',
+                  }}>
+                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
             );
           })

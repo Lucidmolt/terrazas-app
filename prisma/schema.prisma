@@ -50,6 +50,7 @@ model User {
   notificationPrefs     NotificationPreference?
   sentMessages          Message[]              @relation("SentMessages")
   pushSubscriptions     PushSubscription[]
+  subscriptions         Subscription[]         @relation("CustomerSubscriptions")
 }
 
 // ── Providers (Pro Profiles) ────────────────────────────────────────
@@ -219,6 +220,11 @@ model Job {
   disputeReason    String?
   disputePhotoUrl  String?
   disputeStatus    String?   // pending | resolved_refunded | resolved_rejected
+
+  // ── Quality Scan ──
+  qualityScore     Float?
+  qualityPassed    Boolean?
+  qualityFeedback  String?
 
   // Relations
   customer      User           @relation("CustomerJobs", fields: [customerId], references: [id])
@@ -447,5 +453,32 @@ model PushSubscription {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// ── Lawn Care Subscriptions ─────────────────────────────────────────
+model Subscription {
+  id              String   @id @default(cuid())
+  customerId      String
+  serviceType     String   @default("mowing")
+  tier            String   @default("basic")
+  scope           String   @default("front_back")
+  lotSize         String   @default("medium")
+  address         String
+  latitude        Float?
+  longitude       Float?
+  placeId         String?
+  frequencyDays   Int      @default(14)
+  preferredProId  String?
+  isActive        Boolean  @default(true)
+  photoFrontUrl   String?
+  photoBackUrl    String?
+  photoExtraUrl   String?
+  lastJobCreatedAt DateTime?
+  nextJobDueDate  DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        User     @relation("CustomerSubscriptions", fields: [customerId], references: [id], onDelete: Cascade)
 }
 

@@ -15,6 +15,9 @@ interface JobItem {
   customer?: { name: string | null };
   review?: { rating: number; comment: string | null } | null;
   tip?: { amount: number; status: string } | null;
+  qualityScore?: number | null;
+  qualityPassed?: boolean | null;
+  qualityFeedback?: string | null;
 }
 
 interface ProviderInfo {
@@ -75,6 +78,35 @@ export default function ProDashboard() {
   const [announcementMsg, setAnnouncementMsg] = useState('');
   const [customQuotes, setCustomQuotes] = useState<Record<string, string>>({});
   const [announcementLoading, setAnnouncementLoading] = useState(false);
+
+  // Route optimization states
+  const [optimizedRoute, setOptimizedRoute] = useState<any>(null);
+  const [optimizingRoute, setOptimizingRoute] = useState(false);
+  const [showRouteModal, setShowRouteModal] = useState(false);
+
+  const handleOptimizeRoute = async () => {
+    setOptimizingRoute(true);
+    try {
+      const activeJobIds = myJobs.map(j => j.id);
+      const res = await fetch('/api/provider/optimize-route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobIds: activeJobIds }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOptimizedRoute(data);
+        setShowRouteModal(true);
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to optimize route.');
+      }
+    } catch (err) {
+      alert('Failed to optimize route.');
+    } finally {
+      setOptimizingRoute(false);
+    }
+  };
 
   // Geolocation watch telemetry for active jobs that are en_route
   useEffect(() => {
@@ -626,84 +658,115 @@ export default function ProDashboard() {
 
         {/* MY JOBS */}
         {tab === 'myjobs' && (
-          myJobs.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
-              <div style={{ fontSize: 48 }}>🔧</div>
-              <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 12 }}>No active jobs</h2>
-              <p style={{ fontSize: 13 }}>Claim a job from the feed to get started.</p>
-            </div>
-          ) : myJobs.map(job => {
-            const flow = STATUS_FLOW[job.status];
-            const isHighlighted = highlightedJobId === job.id;
-            return (
-              <div
-                key={job.id}
-                id={`job-${job.id}`}
-                style={{
-                  background: '#1e293b',
-                  borderRadius: 16,
-                  padding: 20,
-                  marginBottom: 12,
-                  border: isHighlighted ? '2px solid #34d399' : '1px solid #334155',
-                  boxShadow: isHighlighted ? '0 0 15px rgba(52, 211, 153, 0.3)' : 'none',
-                  transition: 'all 0.3s ease-in-out'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 700 }}>📍 {job.address || job.zipCode}</h3>
-                    <p style={{ fontSize: 13, color: '#94a3b8' }}>{job.serviceType?.replace('_', ' ')} — {job.tier}</p>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                      <span style={{ fontSize: 12, color: '#64748b' }}>Customer: {job.customer?.name || 'Assigned'}</span>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setActiveChatJobId(job.id); }}
-                        style={{ padding: '4px 10px', borderRadius: 6, background: '#1e293b', color: '#34d399', border: '1px solid #334155', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-                      >
-                        💬 Chat
-                      </button>
-                    </div>
-
-                    {/* Job Photos */}
-                    {(job.photoFrontUrl || job.photoBackUrl) && (
-                      <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                        {job.photoFrontUrl && (
-                          <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
-                            <img src={job.photoFrontUrl} alt="Front Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          </div>
-                        )}
-                        {job.photoBackUrl && (
-                          <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
-                            <img src={job.photoBackUrl} alt="Back Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: '#34d399' }}>${job.providerPayout || job.price}</div>
-                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: job.status === 'pending_approval' ? '#fef3c7' : '#059669', color: job.status === 'pending_approval' ? '#92400e' : '#fff', fontWeight: 700 }}>
-                      {job.status === 'pending_approval' ? '⏳ Awaiting approval' : job.status.replace('_', ' ').toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-                {/* Status update button */}
-                {flow && (
-                  flow.next === 'completed' ? (
-                    <label style={{ display: 'block', width: '100%', padding: 14, borderRadius: 12, background: '#059669', color: '#fff', fontWeight: 800, fontSize: 14, textAlign: 'center', cursor: 'pointer', marginTop: 8 }}>
-                      {flow.icon} {flow.label}
-                      <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
-                        onChange={e => { if (e.target.files?.[0]) uploadCompletionPhoto(job.id, e.target.files[0]); }} />
-                    </label>
-                  ) : (
-                    <button onClick={() => updateStatus(job.id, flow.next)} disabled={statusLoading === job.id}
-                      style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: '#059669', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', marginTop: 8, opacity: statusLoading === job.id ? 0.5 : 1 }}>
-                      {flow.icon} {flow.label}
-                    </button>
-                  )
-                )}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {myJobs.length >= 2 && (
+              <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 16, padding: 16, marginBottom: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 800, color: '#fff', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                  🗺️ Daily Route Planner
+                </h3>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 12px' }}>
+                  Have multiple active jobs? Let our AI optimize your driving route to save time and gas.
+                </p>
+                <button
+                  onClick={handleOptimizeRoute}
+                  disabled={optimizingRoute}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    borderRadius: '12px',
+                    border: 'none',
+                    background: '#059669',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    opacity: optimizingRoute ? 0.6 : 1,
+                  }}
+                >
+                  {optimizingRoute ? 'Optimizing Route...' : '🗺️ Optimize driving route'}
+                </button>
               </div>
-            );
-          })
+            )}
+
+            {myJobs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
+                <div style={{ fontSize: 48 }}>🔧</div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 12 }}>No active jobs</h2>
+                <p style={{ fontSize: 13 }}>Claim a job from the feed to get started.</p>
+              </div>
+            ) : myJobs.map(job => {
+              const flow = STATUS_FLOW[job.status];
+              const isHighlighted = highlightedJobId === job.id;
+              return (
+                <div
+                  key={job.id}
+                  id={`job-${job.id}`}
+                  style={{
+                    background: '#1e293b',
+                    borderRadius: 16,
+                    padding: 20,
+                    marginBottom: 12,
+                    border: isHighlighted ? '2px solid #34d399' : '1px solid #334155',
+                    boxShadow: isHighlighted ? '0 0 15px rgba(52, 211, 153, 0.3)' : 'none',
+                    transition: 'all 0.3s ease-in-out'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700 }}>📍 {job.address || job.zipCode}</h3>
+                      <p style={{ fontSize: 13, color: '#94a3b8' }}>{job.serviceType?.replace('_', ' ')} — {job.tier}</p>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                        <span style={{ fontSize: 12, color: '#64748b' }}>Customer: {job.customer?.name || 'Assigned'}</span>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setActiveChatJobId(job.id); }}
+                          style={{ padding: '4px 10px', borderRadius: 6, background: '#1e293b', color: '#34d399', border: '1px solid #334155', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          💬 Chat
+                        </button>
+                      </div>
+
+                      {/* Job Photos */}
+                      {(job.photoFrontUrl || job.photoBackUrl) && (
+                        <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                          {job.photoFrontUrl && (
+                            <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
+                              <img src={job.photoFrontUrl} alt="Front Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            </div>
+                          )}
+                          {job.photoBackUrl && (
+                            <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid #334155', height: 80 }}>
+                              <img src={job.photoBackUrl} alt="Back Yard" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: '#34d399' }}>${job.providerPayout || job.price}</div>
+                      <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: job.status === 'pending_approval' ? '#fef3c7' : '#059669', color: job.status === 'pending_approval' ? '#92400e' : '#fff', fontWeight: 700 }}>
+                        {job.status === 'pending_approval' ? '⏳ Awaiting approval' : job.status.replace('_', ' ').toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                  {/* Status update button */}
+                  {flow && (
+                    flow.next === 'completed' ? (
+                      <label style={{ display: 'block', width: '100%', padding: 14, borderRadius: 12, background: '#059669', color: '#fff', fontWeight: 800, fontSize: 14, textAlign: 'center', cursor: 'pointer', marginTop: 8 }}>
+                        {flow.icon} {flow.label}
+                        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                          onChange={e => { if (e.target.files?.[0]) uploadCompletionPhoto(job.id, e.target.files[0]); }} />
+                      </label>
+                    ) : (
+                      <button onClick={() => updateStatus(job.id, flow.next)} disabled={statusLoading === job.id}
+                        style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: '#059669', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', marginTop: 8, opacity: statusLoading === job.id ? 0.5 : 1 }}>
+                        {flow.icon} {flow.label}
+                      </button>
+                    )
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {/* ── EARNINGS / PAYOUT TAB ── */}
@@ -904,6 +967,17 @@ export default function ProDashboard() {
                   <div style={{ background: '#0f172a', borderRadius: 10, padding: 10, marginTop: 8 }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24' }}>{'★'.repeat(job.review.rating)}{'☆'.repeat(5 - job.review.rating)}</div>
                     {job.review.comment && <p style={{ fontSize: 11, color: '#94a3b8', margin: '4px 0 0' }}>&ldquo;{job.review.comment}&rdquo;</p>}
+                  </div>
+                )}
+                {job.qualityScore !== null && job.qualityScore !== undefined && (
+                  <div style={{ background: '#0f172a', borderRadius: 10, padding: 10, marginTop: 8, borderLeft: job.qualityPassed ? '4px solid #10b981' : '4px solid #f59e0b' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8' }}>🤖 AI Quality Check</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: job.qualityPassed ? '#10b981' : '#f59e0b' }}>
+                        {job.qualityScore}/10 ({job.qualityPassed ? 'PASS' : 'FLAGGED'})
+                      </span>
+                    </div>
+                    {job.qualityFeedback && <p style={{ fontSize: 11, color: '#94a3b8', margin: '4px 0 0' }}>{job.qualityFeedback}</p>}
                   </div>
                 )}
                 {job.tip && job.tip.status === 'completed' && (
@@ -1159,6 +1233,111 @@ export default function ProDashboard() {
           </div>
         )}
       </div>
+      {showRouteModal && optimizedRoute && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '20px',
+        }} onClick={() => setShowRouteModal(false)}>
+          <div style={{
+            background: '#1e293b',
+            border: '1px solid #334155',
+            borderRadius: '24px',
+            width: '100%',
+            maxWidth: '480px',
+            padding: '24px',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+            maxHeight: '85vh',
+            overflowY: 'auto',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#fff' }}>Optimized Daily Route</h3>
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                  Total Driving: {optimizedRoute.totalDistanceMi} miles
+                </span>
+              </div>
+              <button onClick={() => setShowRouteModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 20, cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>
+              {optimizedRoute.jobs.map((job: any, index: number) => {
+                return (
+                  <div key={job.id} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', position: 'relative' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        background: '#059669',
+                        color: '#fff',
+                        fontSize: '12px',
+                        fontWeight: 900,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '2px solid #34d399',
+                      }}>
+                        {index + 1}
+                      </div>
+                      {index < optimizedRoute.jobs.length - 1 && (
+                        <div style={{
+                          width: '2px',
+                          background: 'linear-gradient(to bottom, #059669, #334155)',
+                          flex: 1,
+                          minHeight: '40px',
+                          marginTop: '4px',
+                        }} />
+                      )}
+                    </div>
+
+                    <div style={{ flex: 1, background: '#0f172a', border: '1px solid #334155', borderRadius: '16px', padding: '14px' }}>
+                      <h4 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: '#fff' }}>
+                        {job.address.split(',')[0]}
+                      </h4>
+                      <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8' }}>
+                        {job.serviceType.charAt(0).toUpperCase() + job.serviceType.slice(1)} ({job.tier})
+                      </p>
+                      {index > 0 && job.distanceFromPreviousMi > 0 && (
+                        <div style={{ fontSize: '10px', color: '#34d399', fontWeight: 600, marginTop: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          🚗 +{job.distanceFromPreviousMi} miles from stop {index}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setShowRouteModal(false)}
+              style={{
+                width: '100%',
+                padding: '14px',
+                borderRadius: '12px',
+                border: 'none',
+                background: '#059669',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '14px',
+                cursor: 'pointer',
+                marginTop: '24px',
+              }}
+            >
+              Start Driving
+            </button>
+          </div>
+        </div>
+      )}
       {activeChatJobId && providerInfo?.userId && (
         <ChatDrawer jobId={activeChatJobId} onClose={() => setActiveChatJobId(null)} currentUserId={providerInfo.userId} />
       )}
@@ -1263,6 +1442,22 @@ function ChatDrawer({ jobId, onClose, currentUserId }: { jobId: string; onClose:
         }}>✕</button>
       </div>
 
+      {/* Safety Warning Banner */}
+      <div style={{
+        padding: '10px 16px',
+        background: '#451a03',
+        borderBottom: '1px solid #78350f',
+        color: '#fef3c7',
+        fontSize: '11px',
+        lineHeight: '1.4',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}>
+        <span style={{ fontSize: '14px' }}>🛡️</span>
+        <span>Keep chats and payments here to remain covered by our $1,000 Damage Guarantee.</span>
+      </div>
+
       <div style={{
         flex: 1,
         padding: '20px',
@@ -1280,35 +1475,40 @@ function ChatDrawer({ jobId, onClose, currentUserId }: { jobId: string; onClose:
           </div>
         ) : (
           messages.map((msg) => {
+            const isSystem = msg.senderId === 'system';
             const isMe = msg.senderId === currentUserId;
             return (
               <div key={msg.id} style={{
-                alignSelf: isMe ? 'flex-end' : 'flex-start',
-                maxWidth: '75%',
+                alignSelf: isSystem ? 'center' : (isMe ? 'flex-end' : 'flex-start'),
+                maxWidth: isSystem ? '90%' : '75%',
                 display: 'flex',
                 flexDirection: 'column',
+                margin: isSystem ? '8px 0' : '0',
               }}>
                 <div style={{
                   padding: '10px 14px',
-                  borderRadius: isMe ? '16px 16px 0 16px' : '16px 16px 16px 0',
-                  background: isMe ? '#059669' : '#0f172a',
-                  color: '#fff',
-                  fontSize: '14px',
+                  borderRadius: isSystem ? '12px' : (isMe ? '16px 16px 0 16px' : '16px 16px 16px 0'),
+                  background: isSystem ? '#451a03' : (isMe ? '#059669' : '#0f172a'),
+                  color: isSystem ? '#fef3c7' : '#fff',
+                  border: isSystem ? '1px solid #78350f' : (isMe ? 'none' : '1px solid #334155'),
+                  fontSize: isSystem ? '12px' : '14px',
                   lineHeight: '1.4',
                   boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
                   wordBreak: 'break-word',
-                  border: isMe ? 'none' : '1px solid #334155',
+                  textAlign: isSystem ? 'center' : 'left',
                 }}>
                   {msg.content}
                 </div>
-                <span style={{
-                  fontSize: '9px',
-                  color: '#64748b',
-                  marginTop: '4px',
-                  alignSelf: isMe ? 'flex-end' : 'flex-start',
-                }}>
-                  {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                {!isSystem && (
+                  <span style={{
+                    fontSize: '9px',
+                    color: '#64748b',
+                    marginTop: '4px',
+                    alignSelf: isMe ? 'flex-end' : 'flex-start',
+                  }}>
+                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
             );
           })

@@ -85,6 +85,41 @@ export async function POST(
       },
     });
 
+    // Check for disintermediation / leakage keywords
+    const leakageKeywords = [
+      'venmo', 'zelle', 'cashapp', 'paypal', 'cash', 'direct', 
+      'pay me', 'phone', 'number', 'text me', 'call me', 'email', 'cell'
+    ];
+    const lowercaseContent = content.toLowerCase();
+    const hasLeakageKeyword = leakageKeywords.some(keyword => lowercaseContent.includes(keyword));
+
+    if (hasLeakageKeyword) {
+      try {
+        // Ensure system user exists
+        await db.user.upsert({
+          where: { id: 'system' },
+          update: {},
+          create: {
+            id: 'system',
+            role: 'admin',
+            name: 'Terrazas System',
+            email: 'system@terrazas.app',
+          },
+        });
+
+        // Insert warning message
+        await db.message.create({
+          data: {
+            jobId,
+            senderId: 'system',
+            content: '⚠️ Reminder: For your security and to remain eligible for our $1,000 Terrazas Damage Guarantee, please keep all communication and payments within the Terrazas app.',
+          },
+        });
+      } catch (err) {
+        console.error('[Chat API] Failed to insert system warning:', err);
+      }
+    }
+
     return NextResponse.json({ message }, { status: 201 });
   } catch (error: any) {
     console.error('[Chat API] POST Error:', error);

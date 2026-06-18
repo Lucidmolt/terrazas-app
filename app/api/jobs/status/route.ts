@@ -50,6 +50,21 @@ export async function PATCH(request: Request) {
         const payoutAmount = job.providerPayout > 0 ? job.providerPayout : job.price * 0.85;
         await recordJobEarnings(job.providerId, job.id, payoutAmount);
       }
+
+      // ── Trigger Quality Audit comparison scan ──
+      const beforePhoto = job.photoFrontUrl;
+      const afterPhoto = photoAfterUrl || job.photoAfterUrl;
+      if (beforePhoto && afterPhoto) {
+        try {
+          const { compareBeforeAfter } = await import('@/lib/yard-vision');
+          const audit = await compareBeforeAfter(beforePhoto, afterPhoto);
+          updateData.qualityScore = audit.qualityScore;
+          updateData.qualityPassed = audit.qualityPassed;
+          updateData.qualityFeedback = audit.qualityFeedback;
+        } catch (err) {
+          console.error('[Status API] Quality audit failed:', err);
+        }
+      }
     }
 
     const updatedJob = await db.job.update({
