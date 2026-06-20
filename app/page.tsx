@@ -386,6 +386,15 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+
+        <div className="pt-4 mt-6 border-t border-slate-100 flex justify-between items-center text-slate-400 text-[10px] font-medium">
+          <span>&copy; 2026 Terrazas. All rights reserved.</span>
+          <div className="flex gap-2">
+            <a href="/terms" className="hover:text-slate-600 underline">Terms</a>
+            <span>|</span>
+            <a href="/privacy" className="hover:text-slate-600 underline">Privacy</a>
+          </div>
+        </div>
       </aside>
 
       {/* Right Map & Interactive Console Column (Full screen on mobile, right side on desktop) */}
