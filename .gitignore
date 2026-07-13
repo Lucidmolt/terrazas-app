@@ -38,3 +38,6 @@ npm-debug.log*
 
 # Debug
 scripts/local_auditor_proxy.py
+
+# Pulled env snapshots
+.env.pull.*
