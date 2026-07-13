@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://terrazas-app.vercel.app'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://terrazas.app'),
   title: 'Terrazas Lawn Care & Tree Service | Liberal, KS',
   description:
     'Schedule lawn mowing or get a free quote for tree removal, trimming, stump grinding, landscaping and more. Family-owned, serving Southwest Kansas, the Oklahoma Panhandle, and Perryton TX.',
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Terrazas Lawn Care & Tree Service',
     description: 'Book lawn care or request a free quote for tree work in Southwest Kansas.',
-    url: 'https://terrazas-app.vercel.app',
+    url: process.env.NEXT_PUBLIC_APP_URL || 'https://terrazas.app',
     siteName: 'Terrazas Lawn Care & Tree Service',
     type: 'website',
   },

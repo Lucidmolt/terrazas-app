@@ -8,7 +8,7 @@
 
 // Canonical app URL used in email links, Stripe redirects, etc.
 // Set NEXT_PUBLIC_APP_URL when the production domain changes.
-export const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://terrazas-app.vercel.app'
+export const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://terrazas.app'
 
 export const BUSINESS = {
   name: 'Terrazas Lawn Care & Tree Service',
