@@ -30,10 +30,11 @@ export const SERVICE_TYPES = {
 } as const;
 
 export const JOB_STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  broadcast: { label: 'Broadcasting', color: 'text-blue-600 bg-blue-50' },
-  pending_claim: { label: 'Pending Claim', color: 'text-amber-600 bg-amber-50' },
-  active: { label: 'Claimed', color: 'text-emerald-600 bg-emerald-50' },
-  en_route: { label: 'Pro En Route', color: 'text-emerald-600 bg-emerald-50' },
+  broadcast: { label: 'New Request', color: 'text-blue-600 bg-blue-50' },
+  pending_claim: { label: 'New Request', color: 'text-amber-600 bg-amber-50' },
+  pending_approval: { label: 'Quote Sent', color: 'text-amber-600 bg-amber-50' },
+  active: { label: 'Scheduled', color: 'text-emerald-600 bg-emerald-50' },
+  en_route: { label: 'On the Way', color: 'text-emerald-600 bg-emerald-50' },
   in_progress: { label: 'In Progress', color: 'text-emerald-700 bg-emerald-100' },
   completed: { label: 'Completed', color: 'text-slate-600 bg-slate-100' },
   cancelled: { label: 'Cancelled', color: 'text-red-600 bg-red-50' },

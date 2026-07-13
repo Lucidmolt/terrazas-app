@@ -9,22 +9,20 @@
 // Each attempt is logged to the Notification table with its channel.
 
 import { db } from '@/lib/db';
-import { Resend } from 'resend';
+import { sendRawEmail } from '@/lib/email';
+import { APP_URL } from '@/lib/business';
 
 // ── Provider Configs ────────────────────────────────────────────────
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+// Email goes through lib/email.ts (single Resend client + from-address).
 const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID || '';
 const TWILIO_AUTH = process.env.TWILIO_AUTH_TOKEN || '';
 const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER || '';
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Terrazas <onboarding@resend.dev>';
-
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 // ── Types ───────────────────────────────────────────────────────────
 interface HandoffSignal {
   userId: string;
   jobId: string;
-  type: 'job_broadcast' | 'job_claimed' | 'job_completed' | 'job_cancelled' | 'system';
+  type: 'job_broadcast' | 'job_claimed' | 'quote_sent' | 'job_completed' | 'job_cancelled' | 'system';
   title: string;
   body: string;
   priority: 'action' | 'info' | 'rich'; // action = SMS, rich = email, info = in-app only
@@ -185,39 +183,16 @@ async function sendEmail(email: string, subject: string, textBody: string): Prom
         ).join('')}
       </div>
       <div style="text-align: center; margin-top: 24px;">
-        <a href="https://terrazas.app" style="display: inline-block; background: #166534; color: white; text-decoration: none; padding: 12px 32px; border-radius: 24px; font-weight: 700; font-size: 14px;">Open Terrazas</a>
+        <a href="${APP_URL}" style="display: inline-block; background: #166534; color: white; text-decoration: none; padding: 12px 32px; border-radius: 24px; font-weight: 700; font-size: 14px;">Open Terrazas</a>
       </div>
       <p style="text-align: center; color: #94a3b8; font-size: 10px; margin-top: 24px;">
-        © ${new Date().getFullYear()} Terrazas · Liberal, KS · <a href="https://terrazas.app" style="color: #94a3b8;">terrazas.app</a>
+        © ${new Date().getFullYear()} Terrazas · Liberal, KS · <a href="${APP_URL}" style="color: #94a3b8;">terrazas.app</a>
       </p>
     </div>
   `;
 
-  if (!resend) {
-    console.log(`📧 EMAIL (mock) → ${email}: ${subject}`);
-    return { channel: 'email', success: false, error: 'Resend not configured' };
-  }
-
-  try {
-    const { error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: email,
-      subject,
-      text: textBody,
-      html: htmlBody,
-    });
-
-    if (error) {
-      console.error(`📧 EMAIL FAILED → ${email}:`, error);
-      return { channel: 'email', success: false, error: JSON.stringify(error) };
-    }
-
-    console.log(`📧 EMAIL SENT → ${email}: ${subject}`);
-    return { channel: 'email', success: true };
-  } catch (err: any) {
-    console.error(`📧 EMAIL ERROR → ${email}:`, err.message);
-    return { channel: 'email', success: false, error: err.message };
-  }
+  const result = await sendRawEmail(email, subject, htmlBody, textBody);
+  return { channel: 'email', success: result.success, error: result.error };
 }
 
 // ── Master Dispatch: Multi-Channel Cascade ──────────────────────────

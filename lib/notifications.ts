@@ -1,13 +1,7 @@
 import { db } from '@/lib/db';
-import { Resend } from 'resend';
+import { APP_URL } from '@/lib/business';
 import { dispatchSignal } from '@/lib/dispatch';
-
-// ── Email Provider ─────────────────────────────────────────────────
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
-
-// From address — uses terrazas.app domain when verified, otherwise Resend default
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Terrazas <onboarding@resend.dev>';
+import { sendRawEmail } from '@/lib/email';
 
 // ── Types ──────────────────────────────────────────────────────────
 type NotificationType =
@@ -64,41 +58,16 @@ async function sendEmailNotification(
         ).join('')}
       </div>
       <div style="text-align: center; margin-top: 24px;">
-        <a href="https://terrazas.app" style="display: inline-block; background: #166534; color: white; text-decoration: none; padding: 12px 32px; border-radius: 24px; font-weight: 700; font-size: 14px;">Open Terrazas</a>
+        <a href="${APP_URL}" style="display: inline-block; background: #166534; color: white; text-decoration: none; padding: 12px 32px; border-radius: 24px; font-weight: 700; font-size: 14px;">Open Terrazas</a>
       </div>
       <p style="text-align: center; color: #94a3b8; font-size: 10px; margin-top: 24px;">
-        © ${new Date().getFullYear()} Terrazas · Liberal, KS · <a href="https://terrazas.app" style="color: #94a3b8;">terrazas.app</a>
+        © ${new Date().getFullYear()} Terrazas · Liberal, KS · <a href="${APP_URL}" style="color: #94a3b8;">terrazas.app</a>
       </p>
     </div>
   `;
 
-  if (!resend) {
-    // No Resend key — log for development
-    console.log(`📧 EMAIL (mock) → ${email}: ${subject}`);
-    console.log(`   ${textBody.substring(0, 100)}...`);
-    return true;
-  }
-
-  try {
-    const { error } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: email,
-      subject,
-      text: textBody,
-      html: htmlBody,
-    });
-
-    if (error) {
-      console.error(`📧 EMAIL FAILED → ${email}:`, error);
-      return false;
-    }
-
-    console.log(`📧 EMAIL SENT → ${email}: ${subject}`);
-    return true;
-  } catch (err) {
-    console.error(`📧 EMAIL ERROR → ${email}:`, err);
-    return false;
-  }
+  const result = await sendRawEmail(email, subject, htmlBody, textBody);
+  return result.success;
 }
 
 // ── Broadcast Job to Providers ─────────────────────────────────────
@@ -174,7 +143,7 @@ export async function broadcastJobToProviders(jobId: string) {
           `📍 ${job.address || job.zipCode}\n` +
           `🔧 ${job.tier.charAt(0).toUpperCase() + job.tier.slice(1)} ${job.serviceType}\n` +
           `💰 $${job.price.toFixed(2)}\n\n` +
-          `Claim it now: https://terrazas.app/pro\n\n` +
+          `Claim it now: ${APP_URL}/pro\n\n` +
           `— Terrazas`
         );
 
@@ -218,17 +187,23 @@ export async function notifyJobClaimed(jobId: string) {
 
   if (!job || !job.provider) return;
 
-  // System 4: Multi-channel cascade (action priority = Push → SMS → Email)
+  // Two flavors: a quote was sent (needs customer acceptance) vs the
+  // booking was accepted outright (job is scheduled).
+  const isQuote = job.status === 'pending_approval' && !!job.quotedPrice;
+
   await dispatchSignal({
     userId: job.customerId,
     jobId: job.id,
-    type: 'job_claimed',
-    title: '✅ Your job was claimed!',
-    body: `${job.provider.businessName} has claimed your ${job.serviceType} job. ETA: ${job.etaMinutes || 30} minutes.\n\nYou have 10 minutes to approve or reassign.\n\nTrack your job: https://terrazas.app/dashboard`,
-    priority: 'action', // Urgent — customer needs to approve within 10 min
+    type: isQuote ? 'quote_sent' : 'job_claimed',
+    title: isQuote ? '💵 Your quote is ready!' : '✅ You’re on the schedule!',
+    body: isQuote
+      ? `${job.provider.businessName} quoted $${job.quotedPrice!.toFixed(2)} for your ${job.serviceType} request.\n\nReview and accept it: ${APP_URL}/dashboard`
+      : `${job.provider.businessName} accepted your ${job.serviceType} booking.\n\nTrack your service: ${APP_URL}/dashboard`,
+    priority: 'action',
     metadata: {
       providerName: job.provider.businessName,
       etaMinutes: job.etaMinutes || 30,
+      quotedPrice: job.quotedPrice || undefined,
     },
   });
 }
@@ -249,7 +224,7 @@ export async function notifyJobCompleted(jobId: string) {
     jobId: job.id,
     type: 'job_completed',
     title: '🎉 Job complete!',
-    body: `${job.provider.businessName} finished your ${job.serviceType}.\n\n💰 Total charged: $${job.customerTotal.toFixed(2)}\n\nLeave a review: https://terrazas.app/review?jobId=${job.id}`,
+    body: `${job.provider.businessName} finished your ${job.serviceType}.\n\n💰 Total charged: $${job.customerTotal.toFixed(2)}\n\nLeave a review: ${APP_URL}/review?jobId=${job.id}`,
     priority: 'rich', // Rich content — email with receipt details
     metadata: {
       providerName: job.provider.businessName,
@@ -268,9 +243,10 @@ export async function getUserNotifications(userId: string, limit: number = 20) {
 }
 
 // ── Mark Notification Read ─────────────────────────────────────────
-export async function markNotificationRead(notificationId: string) {
-  return db.notification.update({
-    where: { id: notificationId },
+// Scoped to the owning user — updateMany makes a non-owned id a no-op (no IDOR).
+export async function markNotificationRead(notificationId: string, userId: string) {
+  return db.notification.updateMany({
+    where: { id: notificationId, userId },
     data: { isRead: true, readAt: new Date() },
   });
 }

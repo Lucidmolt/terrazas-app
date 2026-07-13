@@ -3,13 +3,14 @@
 import React, { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { TIP_PRESETS } from '@/lib/constants';
+import { BUSINESS } from '@/lib/business';
 
 function ReviewContent() {
   const searchParams = useSearchParams();
   const jobId = searchParams.get('jobId') || '';
-  const proName = searchParams.get('proName') || 'Your Pro';
-  const providerId = searchParams.get('providerId') || '';
-  const customerId = searchParams.get('customerId') || 'demo-customer';
+  // Identity comes from the session server-side; the API derives the
+  // provider from the job record.
+  const proName = searchParams.get('proName') || BUSINESS.shortName;
 
   const [step, setStep] = useState<'review' | 'tip' | 'done'>('review');
   const [rating, setRating] = useState(5);
@@ -29,14 +30,12 @@ function ReviewContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jobId,
-          authorId: customerId,
-          providerId,
           rating,
           comment: comment || null,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.message || data.error);
       setStep('tip');
     } catch (err: any) {
       setError(err.message || 'Failed to submit review');
@@ -58,10 +57,10 @@ function ReviewContent() {
       const res = await fetch('/api/tips', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId, customerId, providerId, amount }),
+        body: JSON.stringify({ jobId, amount }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.message || data.error);
       setStep('done');
     } catch (err: any) {
       setError(err.message || 'Failed to process tip');

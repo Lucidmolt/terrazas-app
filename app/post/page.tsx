@@ -2,6 +2,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import AuthModal from '@/components/AuthModal';
 import { createClient } from '@/lib/supabase-browser';
+import { SERVICES, getService, isZipServed, BUSINESS } from '@/lib/business';
 
 const SCOPE_OPTIONS = [
   { value: 'front_only', label: 'Front yard only', mult: '0.6x', icon: '🏠' },
@@ -16,7 +17,7 @@ const LOT_OPTIONS = [
   { value: 'xl', label: 'XL (> 0.5 acre)', mult: '1.6x' },
 ];
 const URGENCY_OPTIONS = [
-  { value: 'scheduled', label: 'Scheduled (2+ days)', mult: '0.9x', icon: '📅' },
+  { value: 'scheduled', label: 'Pick a day', mult: '0.9x', icon: '📅' },
   { value: 'same_day', label: 'Same day', mult: '1.0x', icon: '☀️' },
   { value: 'asap', label: 'ASAP (within 2 hours)', mult: '1.2x', icon: '⚡' },
 ];
@@ -28,15 +29,23 @@ const EXTRAS = [
   { key: 'steep_slope', label: 'Steep slope surcharge', cost: 10 },
   { key: 'heavy_debris', label: 'Heavy debris/leaves', cost: 15 },
 ];
+const TIME_WINDOWS = [
+  { value: 'anytime', label: 'Anytime' },
+  { value: 'morning', label: 'Morning' },
+  { value: 'afternoon', label: 'Afternoon' },
+  { value: 'evening', label: 'Evening' },
+];
+
+type StepName = 'service' | 'location' | 'details' | 'photos' | 'review';
 
 export default function PostJobPage() {
-  const [step, setStep] = useState(0);
+  const [serviceId, setServiceId] = useState<string>('');
+  const [stepIndex, setStepIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [pricing, setPricing] = useState<any>(null);
   const [photos, setPhotos] = useState<{ front?: string; back?: string; extra?: string }>({});
   const [uploading, setUploading] = useState(false);
-  const [providerId, setProviderId] = useState<string | null>(null);
 
   // Auth states
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -52,7 +61,7 @@ export default function PostJobPage() {
   // Scan states
   const [scanScore, setScanScore] = useState<number | null>(null);
 
-  // Subscription states
+  // Subscription states (mowing only)
   const [isRecurring, setIsRecurring] = useState(false);
   const [frequencyDays, setFrequencyDays] = useState(14);
 
@@ -69,22 +78,41 @@ export default function PostJobPage() {
     extras: [] as string[],
     customerNotes: '',
     conditionScore: 5,
+    preferredDate: '',
+    timeWindow: 'anytime',
   });
+
+  const service = getService(serviceId);
+  const isQuote = service ? service.mode === 'quote' : false;
+
+  // Quote flow skips the priced yard-details + required-photos steps
+  const stepFlow: StepName[] = isQuote
+    ? ['service', 'location', 'details', 'review']
+    : ['service', 'location', 'details', 'photos', 'review'];
+  const stepLabels: Record<StepName, string> = {
+    service: 'Service',
+    location: 'Location',
+    details: isQuote ? 'Job Details' : 'Yard Details',
+    photos: 'Photos',
+    review: 'Review',
+  };
+  const currentStep: StepName = stepFlow[Math.min(stepIndex, stepFlow.length - 1)];
 
   // Check for query parameters or local storage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const scan = params.get('scan');
-      const proId = params.get('providerId');
       const zip = params.get('zip');
       const tier = params.get('tier');
       const addr = params.get('address');
-      
-      if (proId) {
-        setProviderId(proId);
+      const svc = params.get('service');
+
+      if (svc && getService(svc)) {
+        setServiceId(svc);
+        setStepIndex(1); // service preselected — start at location
       }
-      
+
       let score: number | null = null;
       if (scan) {
         score = parseFloat(scan);
@@ -135,8 +163,9 @@ export default function PostJobPage() {
   const set = (key: string, value: any) => setForm(f => ({ ...f, [key]: value }));
   const toggleExtra = (key: string) => set('extras', form.extras.includes(key) ? form.extras.filter(e => e !== key) : [...form.extras, key]);
 
-  // Real-time Pricing synchronization
+  // Real-time pricing preview — fixed-price bookings only
   useEffect(() => {
+    if (isQuote || !serviceId) { setPricing(null); return; }
     const fetchRealTimePreview = async () => {
       const params = new URLSearchParams({
         scope: form.scope,
@@ -157,7 +186,7 @@ export default function PostJobPage() {
       }
     };
     fetchRealTimePreview();
-  }, [form.scope, form.lotSize, form.urgency, form.tier, form.conditionScore, form.extras]);
+  }, [form.scope, form.lotSize, form.urgency, form.tier, form.conditionScore, form.extras, isQuote, serviceId]);
 
   // Handle address input typing
   const handleAddressChange = async (val: string) => {
@@ -222,7 +251,7 @@ export default function PostJobPage() {
     setUploading(false);
   }, []);
 
-  // Submit job
+  // Submit booking / quote request
   const submitJob = async () => {
     if (!isAuthenticated) {
       setShouldSubmitAfterAuth(true);
@@ -231,10 +260,12 @@ export default function PostJobPage() {
     }
     setLoading(true); setError('');
     try {
-      const endpoint = isRecurring ? '/api/subscriptions' : '/api/jobs';
+      const endpoint = isRecurring && !isQuote ? '/api/subscriptions' : '/api/jobs';
       const res = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          serviceType: serviceId,
+          requestType: isQuote ? 'quote' : 'book',
           address: form.address,
           zipCode: form.zipCode,
           scope: form.scope,
@@ -243,26 +274,42 @@ export default function PostJobPage() {
           tier: form.tier,
           extras: form.extras,
           customerNotes: form.customerNotes,
+          preferredDate: form.preferredDate || undefined,
+          timeWindow: form.timeWindow,
           photoFrontUrl: photos.front,
           photoBackUrl: photos.back,
           photoExtraUrl: photos.extra,
-          conditionScore: form.conditionScore,
+          conditionScore: isQuote ? undefined : form.conditionScore,
           latitude: form.latitude,
           longitude: form.longitude,
           placeId: form.placeId,
-          providerId: providerId || undefined,
-          frequencyDays: isRecurring ? frequencyDays : undefined,
+          frequencyDays: isRecurring && !isQuote ? frequencyDays : undefined,
         }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error); setLoading(false); return; }
+      if (!res.ok) { setError(data.message || data.error); setLoading(false); return; }
       // Redirect to dashboard
       window.location.href = `/dashboard?newJob=${data.job?.id || ''}`;
-    } catch { setError('Failed to create job'); }
+    } catch { setError('Failed to submit your request'); }
     setLoading(false);
   };
 
-  const steps = ['Location', 'Yard Details', 'Photos', 'Review & Pay'];
+  const goBack = () => { setError(''); setStepIndex(i => Math.max(0, i - 1)); };
+  const goNext = () => {
+    setError('');
+    if (currentStep === 'location') {
+      if (!form.address || form.zipCode.length < 5) { setError('Enter your address and zip code to continue.'); return; }
+      if (!isZipServed(form.zipCode)) {
+        setError(`We don't regularly serve ${form.zipCode} yet — call ${BUSINESS.phone} and we'll see what we can do.`);
+        return;
+      }
+    }
+    if (currentStep === 'photos' && !isQuote && (!photos.front || !photos.back)) {
+      setError('Please upload both front and back yard photos to continue.');
+      return;
+    }
+    setStepIndex(i => Math.min(stepFlow.length - 1, i + 1));
+  };
 
   const getConditionLabel = (score: number) => {
     if (score <= 3) return { label: 'Well-Kept', color: '#059669', bg: '#ecfdf5', icon: '✨' };
@@ -290,6 +337,51 @@ export default function PostJobPage() {
     fontSize: 14, outline: 'none', boxSizing: 'border-box', background: '#f8fafc',
     transition: 'all 0.2s',
   };
+  const label: React.CSSProperties = {
+    fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6, display: 'block',
+    textTransform: 'uppercase', letterSpacing: '0.05em',
+  };
+
+  // ── Shared: preferred date & time window picker ──
+  const schedulePicker = (
+    <div style={card}>
+      <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>📅 When works for you?</h2>
+      <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+        {isQuote ? 'Optional — when would you like the work done?' : 'Pick your preferred service day.'} We&apos;ll confirm the exact time with you.
+      </p>
+      <label style={label}>Preferred day</label>
+      <input
+        type="date"
+        style={{ ...input, marginBottom: 14 }}
+        min={new Date().toISOString().split('T')[0]}
+        value={form.preferredDate}
+        onChange={e => set('preferredDate', e.target.value)}
+      />
+      <label style={label}>Time of day</label>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+        {TIME_WINDOWS.map(tw => {
+          const active = form.timeWindow === tw.value;
+          return (
+            <button key={tw.value} onClick={() => set('timeWindow', tw.value)}
+              style={{
+                padding: '10px 4px', borderRadius: 12, cursor: 'pointer', fontSize: 12, fontWeight: 800,
+                border: active ? '2px solid #059669' : '1px solid #cbd5e1',
+                background: active ? '#ecfdf5' : '#fff', color: active ? '#059669' : '#475569',
+              }}>
+              {tw.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const backNextRow = (nextLabel = 'Continue →') => (
+    <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+      <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none', width: 140 }} onClick={goBack}>← Back</button>
+      <button style={primaryBtn} onClick={goNext}>{nextLabel}</button>
+    </div>
+  );
 
   return (
     <div style={s}>
@@ -303,26 +395,28 @@ export default function PostJobPage() {
           to { transform: translate(-50%, 0); opacity: 1; }
         }
       `}</style>
-      
+
       <header style={{ padding: '16px 24px', borderBottom: '1px solid #e2e8f0', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', position: 'sticky', top: 0, zIndex: 10 }}>
         <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <a href="/" style={{ textDecoration: 'none' }}><h1 style={{ fontSize: 22, fontWeight: 900, color: '#166534', margin: 0 }}>TERRAZAS</h1></a>
-          <span style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>Post a Job</span>
+          <span style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>
+            {service ? (isQuote ? 'Request a Quote' : 'Schedule Service') : 'Request Service'}
+          </span>
         </div>
       </header>
 
       <main style={{ maxWidth: 600, margin: '0 auto', padding: '24px 16px 140px' }}>
-        
+
         {/* Visual Stepper */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32, position: 'relative' }}>
           <div style={{ position: 'absolute', top: '18px', left: '20px', right: '20px', height: '2px', background: '#e2e8f0', zIndex: 1 }} />
-          <div style={{ position: 'absolute', top: '18px', left: '20px', right: '20px', height: '2px', background: '#059669', width: `${(step / (steps.length - 1)) * 100}%`, zIndex: 1, transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }} />
+          <div style={{ position: 'absolute', top: '18px', left: '20px', right: '20px', height: '2px', background: '#059669', width: `${(stepIndex / (stepFlow.length - 1)) * 100}%`, zIndex: 1, transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }} />
 
-          {steps.map((label, i) => {
-            const isCompleted = i < step;
-            const isActive = i === step;
+          {stepFlow.map((name, i) => {
+            const isCompleted = i < stepIndex;
+            const isActive = i === stepIndex;
             return (
-              <div key={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, flex: 1 }}>
+              <div key={name} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, flex: 1 }}>
                 <div style={{
                   width: '36px',
                   height: '36px',
@@ -347,15 +441,15 @@ export default function PostJobPage() {
                   marginTop: '8px',
                   textAlign: 'center',
                 }}>
-                  {label}
+                  {stepLabels[name]}
                 </span>
               </div>
             );
           })}
         </div>
 
-        {/* Condition Scan Banner */}
-        {scanScore !== null && (
+        {/* Condition Scan Banner (mowing bookings) */}
+        {scanScore !== null && !isQuote && (
           <div style={{
             background: getConditionLabel(scanScore).bg,
             border: '1px solid',
@@ -403,12 +497,54 @@ export default function PostJobPage() {
 
         {error && <div style={{ ...card, background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b', fontSize: 14, fontWeight: 600 }}>⚠️ {error}</div>}
 
-        {/* STEP 0: Location */}
-        {step === 0 && (
+        {/* STEP: Service picker */}
+        {currentStep === 'service' && (
+          <div style={card}>
+            <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>🌿 What do you need done?</h2>
+            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 18 }}>Lawn mowing books at a flat rate. Everything else gets a free quote from us — usually the same day.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {SERVICES.map(svc => {
+                const active = serviceId === svc.id;
+                return (
+                  <button key={svc.id} onClick={() => setServiceId(svc.id)}
+                    style={{
+                      padding: '18px 14px', borderRadius: 16, cursor: 'pointer', textAlign: 'left',
+                      border: active ? '2px solid #059669' : '1px solid #cbd5e1',
+                      background: active ? '#ecfdf5' : '#fff',
+                      transition: 'all 0.15s',
+                      boxShadow: active ? '0 4px 12px rgba(5, 150, 105, 0.08)' : 'none',
+                    }}>
+                    <div style={{ fontSize: 26, marginBottom: 6 }}>{svc.emoji}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: active ? '#059669' : '#1e293b' }}>{svc.name}</div>
+                    <div style={{
+                      display: 'inline-block', marginTop: 6, fontSize: 9, fontWeight: 900, letterSpacing: '0.08em',
+                      textTransform: 'uppercase' as const, padding: '3px 8px', borderRadius: 20,
+                      background: svc.mode === 'book' ? '#d1fae5' : '#fef3c7',
+                      color: svc.mode === 'book' ? '#047857' : '#b45309',
+                    }}>
+                      {svc.mode === 'book' ? 'Instant price' : 'Free quote'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ height: 20 }} />
+            <button
+              style={{ ...primaryBtn, opacity: !serviceId ? 0.6 : 1 }}
+              disabled={!serviceId}
+              onClick={goNext}
+            >
+              Continue →
+            </button>
+          </div>
+        )}
+
+        {/* STEP: Location */}
+        {currentStep === 'location' && (
           <div style={card}>
             <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 18 }}>📍 Where&apos;s the job?</h2>
-            
-            <label style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6, display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Street Address</label>
+
+            <label style={label}>Street Address</label>
             <div style={{ position: 'relative', marginBottom: 16 }}>
               <input
                 style={input}
@@ -417,7 +553,7 @@ export default function PostJobPage() {
                 onChange={e => handleAddressChange(e.target.value)}
                 autoComplete="street-address"
               />
-              
+
               {fetchingSuggestions && (
                 <div style={{ position: 'absolute', right: 14, top: 14, fontSize: 12, color: '#94a3b8' }}>Searching...</div>
               )}
@@ -457,30 +593,93 @@ export default function PostJobPage() {
               )}
             </div>
 
-            <label style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6, display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Zip Code</label>
+            <label style={label}>Zip Code</label>
             <input
               style={input}
               placeholder="e.g. 67901"
               maxLength={5}
               value={form.zipCode}
-              onChange={e => set('zipCode', e.target.value)}
+              onChange={e => set('zipCode', e.target.value.replace(/\D/g, ''))}
               autoComplete="postal-code"
             />
-            
+
             <div style={{ height: 24 }} />
-            
-            <button
-              style={{ ...primaryBtn, opacity: !form.address || !form.zipCode || loading ? 0.6 : 1 }}
-              disabled={!form.address || !form.zipCode || loading}
-              onClick={() => setStep(1)}
-            >
-              {loading ? 'Verifying Address...' : 'Continue →'}
-            </button>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none', width: 140 }} onClick={goBack}>← Back</button>
+              <button
+                style={{ ...primaryBtn, opacity: !form.address || !form.zipCode || loading ? 0.6 : 1 }}
+                disabled={!form.address || !form.zipCode || loading}
+                onClick={goNext}
+              >
+                {loading ? 'Verifying Address...' : 'Continue →'}
+              </button>
+            </div>
           </div>
         )}
 
-        {/* STEP 1: Yard Details */}
-        {step === 1 && (
+        {/* STEP: Details — QUOTE flavor */}
+        {currentStep === 'details' && isQuote && (
+          <>
+            <div style={card}>
+              <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>{service?.emoji} Tell us about the job</h2>
+              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16, lineHeight: 1.5 }}>
+                The more detail you give, the faster and more accurate your free quote will be.
+              </p>
+              <label style={label}>Describe the work</label>
+              <textarea
+                style={{ ...input, minHeight: 120, resize: 'vertical' }}
+                placeholder={`e.g. "Large elm in the backyard, about 30ft, hanging over the garage. Want it removed and hauled off."`}
+                value={form.customerNotes}
+                onChange={e => set('customerNotes', e.target.value)}
+              />
+            </div>
+
+            <div style={card}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>📸 Photos (optional, but they help)</h2>
+              <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>A couple of photos usually means we can quote without a site visit.</p>
+              {(['front', 'back', 'extra'] as const).map(slot => {
+                const slotLabel = slot === 'front' ? 'Photo 1' : slot === 'back' ? 'Photo 2' : 'Photo 3';
+                return (
+                  <div key={slot} style={{ marginBottom: 16 }}>
+                    {photos[slot] ? (
+                      <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', border: '2px solid #059669', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+                        <img src={photos[slot]} alt={slotLabel} style={{ width: '100%', height: 160, objectFit: 'cover' }} />
+                        <button
+                          onClick={() => setPhotos(p => ({ ...p, [slot]: undefined }))}
+                          style={{
+                            position: 'absolute', top: 12, right: 12, background: 'rgba(239, 68, 68, 0.9)',
+                            color: '#fff', border: 'none', borderRadius: '50%', width: 32, height: 32,
+                            cursor: 'pointer', fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : (
+                      <label style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                        height: 64, borderRadius: 14, border: '2px dashed #cbd5e1', cursor: 'pointer',
+                        color: '#94a3b8', fontSize: 13, background: '#f8fafc',
+                      }}>
+                        <span style={{ fontSize: '20px' }}>📷</span>
+                        <span style={{ fontWeight: 700 }}>{uploading ? 'Uploading...' : `Add ${slotLabel.toLowerCase()}`}</span>
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) uploadPhoto(e.target.files[0], slot); }} />
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {schedulePicker}
+            {backNextRow('Review Request →')}
+          </>
+        )}
+
+        {/* STEP: Details — BOOKING flavor (mowing) */}
+        {currentStep === 'details' && !isQuote && (
           <>
             <div style={card}>
               <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 18 }}>🌿 What needs mowing?</h2>
@@ -585,6 +784,8 @@ export default function PostJobPage() {
               </div>
             </div>
 
+            {form.urgency === 'scheduled' && schedulePicker}
+
             <div style={card}>
               <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', marginBottom: 16 }}>➕ Add-on Extras</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -633,17 +834,17 @@ export default function PostJobPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-              <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none' }} onClick={() => setStep(0)}>← Back</button>
+              <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none' }} onClick={goBack}>← Back</button>
             </div>
           </>
         )}
 
-        {/* STEP 2: Photos */}
-        {step === 2 && (
+        {/* STEP: Photos (booking flow — required) */}
+        {currentStep === 'photos' && (
           <div style={card}>
             <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>📸 Yard Photos</h2>
-            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20, lineHeight: 1.5 }}>Upload at least 2 photos so we can verify the yard&apos;s condition and provide a final guaranteed price.</p>
-            
+            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20, lineHeight: 1.5 }}>Upload at least 2 photos so we can verify the yard&apos;s condition and stand behind the flat price.</p>
+
             {(['front', 'back', 'extra'] as const).map(slot => {
               const uploaded = !!photos[slot];
               return (
@@ -682,133 +883,155 @@ export default function PostJobPage() {
                       <span style={{ fontSize: '28px', marginBottom: '4px' }}>📷</span>
                       <span style={{ fontWeight: 700 }}>{uploading ? 'Uploading...' : 'Tap to upload'}</span>
                       <span style={{ fontSize: '11px', color: '#cbd5e1', marginTop: '2px' }}>JPEG, PNG up to 10MB</span>
-                      <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) uploadPhoto(e.target.files[0], slot); }} />
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) uploadPhoto(e.target.files[0], slot); }} />
                     </label>
                   )}
                 </div>
               );
             })}
             <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
-              <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none' }} onClick={() => setStep(1)}>← Back</button>
+              <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none' }} onClick={goBack}>← Back</button>
             </div>
           </div>
         )}
 
-        {/* STEP 3: Review & Pay */}
-        {step === 3 && (
+        {/* STEP: Review */}
+        {currentStep === 'review' && (
           <>
-            <div style={card}>
-              <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 18 }}>💰 Pricing Receipt</h2>
-              {pricing ? (
-                <div>
-                  <div style={{ background: '#f8fafc', borderRadius: 16, padding: '20px', border: '1px solid #f1f5f9', marginBottom: 16 }}>
-                    {[
-                      ['Base service price', `$${pricing.basePrice.toFixed(2)}`],
-                      ['Scope multiplier', `${pricing.scopeLabel} (${pricing.scopeMultiplier}x)`],
-                      ['Lot size multiplier', `${pricing.lotSizeLabel} (${pricing.lotSizeMultiplier}x)`],
-                      ['Condition multiplier', `${pricing.conditionLabel} (${pricing.conditionMultiplier}x)`],
-                      ['Urgency multiplier', `${pricing.urgencyLabel} (${pricing.urgencyMultiplier}x)`],
-                    ].map(([label, val]) => (
-                      <div key={label as string} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#64748b' }}>
-                        <span>{label}</span><span style={{ fontWeight: 700, color: '#334155' }}>{val}</span>
-                      </div>
-                    ))}
-                    
-                    {pricing.extrasBreakdown?.length > 0 && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #cbd5e1' }}>
-                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Add-on Extras</div>
-                        {pricing.extrasBreakdown.map((e: any) => (
-                          <div key={e.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '13px', color: '#64748b' }}>
-                            <span>+ {e.label}</span><span style={{ fontWeight: 700, color: '#059669' }}>+${e.cost.toFixed(2)}</span>
+            {isQuote ? (
+              <div style={card}>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>🧾 Your Quote Request</h2>
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 16, padding: '16px 20px', marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#b45309' }}>No payment now — this is a free quote</div>
+                  <p style={{ fontSize: 12, color: '#92400e', margin: '4px 0 0', lineHeight: 1.5 }}>
+                    {BUSINESS.shortName} will review your request and send you a price to approve. Nothing happens until you accept it.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: '#475569' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}><span>{service?.emoji}</span> <strong>{service?.name}</strong></div>
+                  <div style={{ display: 'flex', gap: '8px' }}><span>📍</span> <strong>{form.address}, {form.zipCode}</strong></div>
+                  {form.preferredDate && <div style={{ display: 'flex', gap: '8px' }}><span>📅</span> <span>{form.preferredDate} ({TIME_WINDOWS.find(t => t.value === form.timeWindow)?.label})</span></div>}
+                  {form.customerNotes && <div style={{ display: 'flex', gap: '8px' }}><span>📝</span> <span>{form.customerNotes}</span></div>}
+                  <div style={{ display: 'flex', gap: '8px' }}><span>📸</span> <span>{[photos.front, photos.back, photos.extra].filter(Boolean).length} photo(s) attached</span></div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={card}>
+                  <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginBottom: 18 }}>💰 Pricing Receipt</h2>
+                  {pricing ? (
+                    <div>
+                      <div style={{ background: '#f8fafc', borderRadius: 16, padding: '20px', border: '1px solid #f1f5f9', marginBottom: 16 }}>
+                        {[
+                          ['Base service price', `$${pricing.basePrice.toFixed(2)}`],
+                          ['Scope multiplier', `${pricing.scopeLabel} (${pricing.scopeMultiplier}x)`],
+                          ['Lot size multiplier', `${pricing.lotSizeLabel} (${pricing.lotSizeMultiplier}x)`],
+                          ['Condition multiplier', `${pricing.conditionLabel} (${pricing.conditionMultiplier}x)`],
+                          ['Urgency multiplier', `${pricing.urgencyLabel} (${pricing.urgencyMultiplier}x)`],
+                        ].map(([rowLabel, val]) => (
+                          <div key={rowLabel as string} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#64748b' }}>
+                            <span>{rowLabel}</span><span style={{ fontWeight: 700, color: '#334155' }}>{val}</span>
                           </div>
                         ))}
+
+                        {pricing.extrasBreakdown?.length > 0 && (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #cbd5e1' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Add-on Extras</div>
+                            {pricing.extrasBreakdown.map((e: any) => (
+                              <div key={e.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '13px', color: '#64748b' }}>
+                                <span>+ {e.label}</span><span style={{ fontWeight: 700, color: '#059669' }}>+${e.cost.toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '14px', color: '#475569' }}>
+                        <span>Subtotal Job Price</span><span style={{ fontWeight: 700 }}>${pricing.jobPrice.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px', color: '#94a3b8' }}>
+                        <span>Service Fee (13%)</span><span>${pricing.serviceFee.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px', color: '#94a3b8' }}>
+                        <span>Secure processing fee</span><span>${pricing.processingFee.toFixed(2)}</span>
+                      </div>
+
+                      <div style={{
+                        display: 'flex', justifyContent: 'space-between', padding: '16px 20px', background: '#ecfdf5',
+                        borderRadius: '16px', border: '1px solid #d1fae5', marginTop: 16, fontSize: '18px',
+                        fontWeight: 900, color: '#059669'
+                      }}>
+                        <span>Total (pay after service)</span><span>${pricing.customerTotal.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ) : <p style={{ color: '#94a3b8' }}>Recalculating price breakdown...</p>}
+                </div>
+
+                <div style={card}>
+                  <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>🔁 Recurring Service</h3>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', color: '#1e293b', fontWeight: 600 }}>
+                    <input
+                      type="checkbox"
+                      checked={isRecurring}
+                      onChange={(e) => setIsRecurring(e.target.checked)}
+                      style={{ width: '18px', height: '18px', accentColor: '#059669', cursor: 'pointer' }}
+                    />
+                    Put me on the schedule (automatic future cuts)
+                  </label>
+
+                  {isRecurring && (
+                    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>Choose frequency:</span>
+                      <select
+                        value={frequencyDays}
+                        onChange={(e) => setFrequencyDays(parseInt(e.target.value))}
+                        style={{ ...input, padding: '10px' }}
+                      >
+                        <option value={7}>Weekly (Every 7 days)</option>
+                        <option value={10}>Every 10 days</option>
+                        <option value={14}>Bi-weekly (Every 14 days)</option>
+                        <option value={30}>Monthly (Every 30 days)</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div style={card}>
+                  <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>📝 Special instructions</h3>
+                  <textarea
+                    style={{ ...input, minHeight: 90, resize: 'vertical' }}
+                    placeholder="Pet info, gate code, key box location, or anything the crew should know..."
+                    value={form.customerNotes}
+                    onChange={e => set('customerNotes', e.target.value)}
+                  />
+                </div>
+
+                <div style={card}>
+                  <h3 style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>📋 Summary Details</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: '#475569' }}>
+                    <div style={{ display: 'flex', gap: '8px' }}><span>{service?.emoji}</span> <strong>{service?.name}</strong></div>
+                    <div style={{ display: 'flex', gap: '8px' }}><span>📍</span> <strong>{form.address}, {form.zipCode}</strong></div>
+                    <div style={{ display: 'flex', gap: '8px' }}><span>🌿</span> <span>{SCOPE_OPTIONS.find(o => o.value === form.scope)?.label} ({LOT_OPTIONS.find(o => o.value === form.lotSize)?.label})</span></div>
+                    <div style={{ display: 'flex', gap: '8px' }}><span>⏱️</span> <span>{URGENCY_OPTIONS.find(o => o.value === form.urgency)?.label}{form.urgency === 'scheduled' && form.preferredDate ? ` — ${form.preferredDate} (${TIME_WINDOWS.find(t => t.value === form.timeWindow)?.label})` : ''}</span></div>
+                    {form.extras.length > 0 && (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <span>➕</span>
+                        <span>{form.extras.map(e => EXTRAS.find(x => x.key === e)?.label).join(', ')}</span>
                       </div>
                     )}
                   </div>
-                  
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '14px', color: '#475569' }}>
-                    <span>Subtotal Job Price</span><span style={{ fontWeight: 700 }}>${pricing.jobPrice.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px', color: '#94a3b8' }}>
-                    <span>Service Fee (13%)</span><span>${pricing.serviceFee.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px', color: '#94a3b8' }}>
-                    <span>Secure processing fee</span><span>${pricing.processingFee.toFixed(2)}</span>
-                  </div>
-                  
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between', padding: '16px 20px', background: '#ecfdf5',
-                    borderRadius: '16px', border: '1px solid #d1fae5', marginTop: 16, fontSize: '18px',
-                    fontWeight: 900, color: '#059669'
-                  }}>
-                    <span>Total Charged</span><span>${pricing.customerTotal.toFixed(2)}</span>
-                  </div>
                 </div>
-              ) : <p style={{ color: '#94a3b8' }}>Recalculating price breakdown...</p>}
-            </div>
-
-            <div style={card}>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>🔁 Recurring Subscription</h3>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', color: '#1e293b', fontWeight: 600 }}>
-                <input
-                  type="checkbox"
-                  checked={isRecurring}
-                  onChange={(e) => setIsRecurring(e.target.checked)}
-                  style={{ width: '18px', height: '18px', accentColor: '#059669', cursor: 'pointer' }}
-                />
-                Subscribe & save time (automatically schedule future cuts)
-              </label>
-              
-              {isRecurring && (
-                <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <span style={{ fontSize: '12px', color: '#64748b' }}>Choose frequency:</span>
-                  <select
-                    value={frequencyDays}
-                    onChange={(e) => setFrequencyDays(parseInt(e.target.value))}
-                    style={{ ...input, padding: '10px' }}
-                  >
-                    <option value={7}>Weekly (Every 7 days)</option>
-                    <option value={10}>Every 10 days</option>
-                    <option value={14}>Bi-weekly (Every 14 days)</option>
-                    <option value={30}>Monthly (Every 30 days)</option>
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div style={card}>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>📝 Special instructions</h3>
-              <textarea
-                style={{ ...input, minHeight: 90, resize: 'vertical' }}
-                placeholder="Pet info, gate code, key box location, or details for the provider..."
-                value={form.customerNotes}
-                onChange={e => set('customerNotes', e.target.value)}
-              />
-            </div>
-
-            <div style={card}>
-              <h3 style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', marginBottom: 12 }}>📋 Summary Details</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: '#475569' }}>
-                <div style={{ display: 'flex', gap: '8px' }}><span>📍</span> <strong>{form.address}, {form.zipCode}</strong></div>
-                <div style={{ display: 'flex', gap: '8px' }}><span>🌿</span> <span>{SCOPE_OPTIONS.find(o => o.value === form.scope)?.label} ({LOT_OPTIONS.find(o => o.value === form.lotSize)?.label})</span></div>
-                <div style={{ display: 'flex', gap: '8px' }}><span>⏱️</span> <span>{URGENCY_OPTIONS.find(o => o.value === form.urgency)?.label}</span></div>
-                {form.extras.length > 0 && (
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <span>➕</span>
-                    <span>{form.extras.map(e => EXTRAS.find(x => x.key === e)?.label).join(', ')}</span>
-                  </div>
-                )}
-              </div>
-            </div>
+              </>
+            )}
 
             <p style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', marginBottom: 16 }}>
-              By posting, you agree to our <a href="/terms" style={{ color: '#059669', fontWeight: 600, textDecoration: 'none' }}>Terms of Service</a>
+              By submitting, you agree to our <a href="/terms" style={{ color: '#059669', fontWeight: 600, textDecoration: 'none' }}>Terms of Service</a>
             </p>
 
             <div style={{ display: 'flex', gap: 12 }}>
-              <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none' }} onClick={() => setStep(2)}>← Back</button>
+              <button style={{ ...primaryBtn, background: '#f1f5f9', color: '#475569', boxShadow: 'none' }} onClick={goBack}>← Back</button>
               <button style={{ ...primaryBtn, opacity: loading ? 0.6 : 1 }} disabled={loading} onClick={submitJob}>
-                {loading ? 'Confirming escrows...' : `Confirm & Post Job`}
+                {loading ? 'Submitting...' : isQuote ? 'Request Free Quote' : 'Confirm Booking'}
               </button>
             </div>
           </>
@@ -816,8 +1039,8 @@ export default function PostJobPage() {
 
       </main>
 
-      {/* Dynamic Sticky Bottom Footer */}
-      {pricing && step < 3 && (
+      {/* Dynamic Sticky Bottom Footer (priced bookings only) */}
+      {!isQuote && pricing && (currentStep === 'details' || currentStep === 'photos') && (
         <div style={{
           position: 'fixed',
           bottom: '24px',
@@ -852,19 +1075,9 @@ export default function PostJobPage() {
               fontSize: '15px',
               boxShadow: '0 4px 10px rgba(5, 150, 105, 0.3)',
             }}
-            onClick={() => {
-              if (step === 2) {
-                // Photo check
-                if (!photos.front || !photos.back) {
-                  setError('Please upload both front and back yard photos to continue.');
-                  return;
-                }
-                setError('');
-              }
-              setStep(prev => prev + 1);
-            }}
+            onClick={goNext}
           >
-            {step === 2 ? 'Review & Pay →' : 'Continue →'}
+            {currentStep === 'photos' ? 'Review →' : 'Continue →'}
           </button>
         </div>
       )}

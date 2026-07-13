@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireCronSecret } from '@/lib/api-auth';
 import { calculateDynamicPrice } from '@/lib/pricing';
 import { geocodeAddress } from '@/lib/google-maps';
-import { broadcastJobToProviders } from '@/lib/notifications';
+import { getBusinessProvider } from '@/lib/business-server';
 
 // GET /api/cron/recurring-jobs
 // Triggered by Vercel Cron daily at 7am UTC (2am CDT)
@@ -28,6 +28,12 @@ export async function GET(request: Request) {
     });
 
     console.log(`[Cron:Recurring] Found ${subscriptions.length} subscriptions due for execution`);
+
+    // Single-business mode: every recurring job goes to the business
+    const businessProvider = await getBusinessProvider();
+    if (!businessProvider) {
+      return NextResponse.json({ error: 'No business provider configured — run the seed.' }, { status: 503 });
+    }
 
     let createdJobsCount = 0;
     const details = [];
@@ -95,9 +101,11 @@ export async function GET(request: Request) {
           photoFrontUrl: sub.photoFrontUrl,
           photoBackUrl: sub.photoBackUrl,
           photoExtraUrl: sub.photoExtraUrl,
-          status: sub.preferredProId ? 'pending_claim' : 'broadcast',
-          providerId: sub.preferredProId || null,
-          broadcastedAt: !sub.preferredProId ? now : null,
+          status: 'pending_claim',
+          providerId: businessProvider.id,
+          pendingProId: businessProvider.id,
+          preferredProId: businessProvider.id,
+          broadcastTier: 0,
         },
       });
 
@@ -111,31 +119,19 @@ export async function GET(request: Request) {
         },
       });
 
-      // 5. Trigger notifications / broadcasts
-      if (!sub.preferredProId) {
-        broadcastJobToProviders(job.id).catch((err) => {
-          console.error(`[Cron:Recurring] Broadcast error for job ${job.id}:`, err);
-        });
-      } else {
-        // Target direct offer notification
-        const preferredPro = await db.provider.findUnique({
-          where: { id: sub.preferredProId },
-        });
-        if (preferredPro) {
-          await db.notification.create({
-            data: {
-              userId: preferredPro.userId,
-              jobId: job.id,
-              type: 'job_broadcast',
-              channel: 'in_app',
-              title: '⭐ Direct Job Offer (Recurring)',
-              body: `A customer has requested you directly for a recurring ${job.serviceType} at ${job.address.split(',')[0]} ($${job.price.toFixed(2)}). Claim it now!`,
-              isSent: true,
-              sentAt: new Date(),
-            },
-          });
-        }
-      }
+      // 5. Notify the business a recurring visit is due
+      await db.notification.create({
+        data: {
+          userId: businessProvider.userId,
+          jobId: job.id,
+          type: 'new_booking',
+          channel: 'in_app',
+          title: '🔁 Recurring visit due',
+          body: `Recurring ${job.serviceType} at ${job.address.split(',')[0]} ($${job.price.toFixed(2)}) is due. Accept it to put it on the schedule.`,
+          isSent: true,
+          sentAt: new Date(),
+        },
+      });
 
       createdJobsCount++;
       details.push({ subscriptionId: sub.id, jobId: job.id, address: sub.address });

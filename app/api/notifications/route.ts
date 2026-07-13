@@ -22,7 +22,7 @@ export async function GET(request: Request) {
 // POST /api/notifications — mark notification as read
 export async function POST(request: Request) {
   // C1 FIX: Require authentication
-  const { error: authError } = await requireAuth();
+  const { dbUser, error: authError } = await requireAuth();
   if (authError) return authError;
 
   const { notificationId } = await request.json();
@@ -31,6 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'notificationId is required' }, { status: 400 });
   }
 
-  const notification = await markNotificationRead(notificationId);
-  return NextResponse.json({ notification });
+  // Scoped to the authenticated user — a non-owned notificationId is a no-op
+  const result = await markNotificationRead(notificationId, dbUser!.id);
+  return NextResponse.json({ success: result.count > 0 });
 }

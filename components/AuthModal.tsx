@@ -139,7 +139,9 @@ export default function AuthModal({ isOpen, onClose, initialView = 'choose', ini
     }
 
     if (data.session) {
-      // Sync to Prisma DB
+      // Sync to Prisma DB. Use a local value for the redirect decision —
+      // reading `isNewUser` state right after setIsNewUser() would be stale.
+      let newUser = isNewUser;
       try {
         const res = await fetch('/api/auth/callback', {
           method: 'POST',
@@ -147,7 +149,8 @@ export default function AuthModal({ isOpen, onClose, initialView = 'choose', ini
           body: JSON.stringify({ event: 'SIGNED_IN' }),
         });
         const result = await res.json();
-        setIsNewUser(result.isNewUser);
+        newUser = !!result.isNewUser;
+        setIsNewUser(newUser);
       } catch {
         // Non-fatal
       }
@@ -156,11 +159,11 @@ export default function AuthModal({ isOpen, onClose, initialView = 'choose', ini
 
       setTimeout(() => {
         onClose();
-        if (isNewUser && role === 'pro') {
+        if (newUser && role === 'pro') {
           router.push('/onboarding?role=pro');
         } else if (role === 'pro') {
           router.push('/pro');
-        } else if (isNewUser) {
+        } else if (newUser) {
           router.push('/onboarding?role=customer');
         } else {
           router.push('/dashboard');

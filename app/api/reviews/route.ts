@@ -9,11 +9,13 @@ export async function POST(request: Request) {
   if (authError) return authError;
 
   try {
-    const { jobId, providerId, rating, comment, photoUrl } = await request.json();
+    // SECURITY: providerId/authorId from the body are ignored — the provider is
+    // derived from the job record and the author is the authenticated user.
+    const { jobId, rating, comment, photoUrl } = await request.json();
 
-    if (!jobId || !providerId || !rating) {
+    if (!jobId || !rating) {
       return NextResponse.json(
-        { error: 'jobId, providerId, and rating are required' },
+        { error: 'jobId and rating are required' },
         { status: 400 }
       );
     }
@@ -33,6 +35,12 @@ export async function POST(request: Request) {
     if (job.customerId !== authorId) {
       return NextResponse.json({ error: 'Not authorized to review this job' }, { status: 403 });
     }
+    if (!job.providerId) {
+      return NextResponse.json({ error: 'Job has no assigned provider to review' }, { status: 400 });
+    }
+
+    // Review subject is always the provider who did the job
+    const providerId = job.providerId;
 
     // Create review and update provider rating in a transaction
     const result = await db.$transaction(async (tx) => {

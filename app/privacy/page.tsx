@@ -91,7 +91,7 @@ export default function PrivacyPolicy() {
               <span>4. Data Retention & Deletion</span>
             </div>
             <p className="text-sm text-slate-500 font-medium leading-relaxed">
-              You retain full control over your digital footprint. You can initiate complete account, data, and property mapping deletion at any time via your Profile Settings tab or by contacting support at <span className="text-brand-600 font-bold hover:underline">lucidmolt@icloud.com</span>. Once requested, your profile records are wiped clean from active databases within 48 hours.
+              You retain full control over your digital footprint. You can initiate complete account, data, and property mapping deletion at any time via your Profile Settings tab or by contacting support at <span className="text-brand-600 font-bold hover:underline">terrazaslawncare@gmail.com</span>. Once requested, your profile records are wiped clean from active databases within 48 hours.
             </p>
           </section>
 
@@ -101,7 +101,7 @@ export default function PrivacyPolicy() {
             <p className="text-xs text-slate-500 font-medium leading-relaxed">
               If you have any inquiries regarding data protection, escrow handling, or platform mechanics, reach out directly to the Terrazas administration team at:
               <br />
-              <strong className="text-slate-700">lucidmolt@icloud.com</strong>
+              <strong className="text-slate-700">terrazaslawncare@gmail.com</strong>
             </p>
           </section>
         </div>

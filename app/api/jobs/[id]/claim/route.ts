@@ -99,9 +99,23 @@ export async function POST(
       );
     }
 
+    // ── Accept semantics ──
+    // Quote requests must be priced, then explicitly accepted by the customer
+    // (no auto-approve deadline). Fixed-price bookings the customer already
+    // agreed to go straight to the schedule. A price adjustment on a booking
+    // also requires customer acceptance.
+    const isQuoteRequest = job.requestType === 'quote';
+    const parsedQuote = quotePrice ? parseFloat(quotePrice) : null;
+    if (isQuoteRequest && (!parsedQuote || parsedQuote <= 0)) {
+      return NextResponse.json(
+        { error: 'QUOTE_REQUIRED', message: 'Enter a price to send the customer a quote.' },
+        { status: 400 }
+      );
+    }
+    const needsCustomerApproval = isQuoteRequest || (!!parsedQuote && parsedQuote > 0);
+
     // ── ATOMIC LOCK: Single UPDATE with WHERE status='broadcast' or status='pending_claim' ──
     const now = new Date();
-    const approvalDeadline = new Date(now.getTime() + 10 * 60 * 1000);
 
     const lockResult = await db.job.updateMany({
       where: {
@@ -111,14 +125,23 @@ export async function POST(
           { status: 'pending_claim', providerId: providerId },
         ],
       },
-      data: {
+      data: needsCustomerApproval ? {
         status: 'pending_approval',
         providerId,
         pendingProId: providerId,
         etaMinutes: etaMinutes || 30,
-        quotedPrice: quotePrice ? parseFloat(quotePrice) : null,
+        quotedPrice: parsedQuote,
         claimedAt: now,
-        approvalDeadline,
+        approvalDeadline: null, // quotes never auto-approve
+      } : {
+        status: 'active',
+        providerId,
+        pendingProId: providerId,
+        etaMinutes: etaMinutes || 30,
+        quotedPrice: null,
+        claimedAt: now,
+        approvedAt: now,
+        approvalDeadline: null,
       },
     });
 
@@ -178,8 +201,10 @@ export async function POST(
         yearsInBusiness: provider.yearsInBusiness,
         teamSize: provider.teamSize,
       },
-      approvalDeadline: approvalDeadline.toISOString(),
-      message: 'Job claimed! Customer has 10 minutes to approve or reassign.',
+      approvalDeadline: null,
+      message: needsCustomerApproval
+        ? 'Quote sent! The customer will review and accept it.'
+        : 'Booking accepted — it’s on your schedule.',
     }, { status: 200 });
 
   } catch (error: any) {

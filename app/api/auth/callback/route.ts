@@ -28,12 +28,16 @@ export async function POST(request: Request) {
     if (!user) {
       // Auto-create user record on first sign-in
       isNewUser = true;
+      // SECURITY: Whitelist the role from client-controlled metadata. Only 'pro' or
+      // 'customer' may be self-assigned — 'admin' is promoted directly in the DB.
+      // Role is only set on first create; existing users' roles are never touched here.
+      const role = authUser.user_metadata?.role === 'pro' ? 'pro' : 'customer';
       user = await db.user.create({
         data: {
           email: email || undefined,
           phone: phone || undefined,
           name: authUser.user_metadata?.name || email?.split('@')[0] || 'New User',
-          role: authUser.user_metadata?.role || 'customer',
+          role,
         },
       });
     }

@@ -14,6 +14,7 @@
 // All return the same YardScanResult interface.
 
 import type { YardScanResult, EffortLevel } from './types';
+import { APP_URL } from '@/lib/business';
 
 const SYSTEM_PROMPT = `You are a professional lawn care assessment AI for Terrazas, an on-demand yard service app.
 
@@ -338,7 +339,7 @@ async function fetchImageAsBase64(url: string): Promise<{ base64: string; mimeTy
   }
 
   // Handle absolute or relative URLs
-  const absoluteUrl = url.startsWith('http') ? url : `https://terrazas.app${url}`;
+  const absoluteUrl = url.startsWith('http') ? url : `${APP_URL}${url}`;
   
   const response = await fetch(absoluteUrl);
   if (!response.ok) {

@@ -3,20 +3,20 @@ import './globals.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://terrazas-app.vercel.app'),
-  title: 'Terrazas | Premium On-Demand Lawn Care',
+  title: 'Terrazas Lawn Care & Tree Service | Liberal, KS',
   description:
-    'Instantly book verified lawn professionals. No phone calls, no waiting for quotes. Uber-style dispatch for yard services.',
-  keywords: ['lawn care', 'landscaping', 'on-demand', 'mowing', 'yard service'],
+    'Schedule lawn mowing or get a free quote for tree removal, trimming, stump grinding, landscaping and more. Family-owned, serving Southwest Kansas, the Oklahoma Panhandle, and Perryton TX.',
+  keywords: ['lawn care', 'tree service', 'tree removal', 'stump grinding', 'landscaping', 'mowing', 'Liberal KS', 'Southwest Kansas'],
   manifest: '/manifest.json',
   icons: {
     icon: '/icon-192.png',
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Terrazas | Premium On-Demand Lawn Care',
-    description: 'Instantly book verified lawn professionals.',
+    title: 'Terrazas Lawn Care & Tree Service',
+    description: 'Book lawn care or request a free quote for tree work in Southwest Kansas.',
     url: 'https://terrazas-app.vercel.app',
-    siteName: 'Terrazas',
+    siteName: 'Terrazas Lawn Care & Tree Service',
     type: 'website',
   },
 };
@@ -43,7 +43,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="bg-white text-slate-900 overflow-hidden antialiased">
+      <body className="bg-white text-slate-900 antialiased">
         {children}
       </body>
     </html>

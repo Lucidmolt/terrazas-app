@@ -28,14 +28,15 @@ interface Job {
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-  broadcast: { bg: '#fef3c7', text: '#92400e', label: '📡 Waiting for provider' },
-  pending_approval: { bg: '#dbeafe', text: '#1e40af', label: '⏳ Provider claimed — review now' },
-  active: { bg: '#d1fae5', text: '#065f46', label: '✅ Provider approved' },
-  en_route: { bg: '#e0e7ff', text: '#3730a3', label: '🚗 Provider on the way' },
+  broadcast: { bg: '#fef3c7', text: '#92400e', label: '📨 Request received' },
+  pending_claim: { bg: '#fef3c7', text: '#92400e', label: '📨 Sent to Terrazas — awaiting confirmation' },
+  pending_approval: { bg: '#dbeafe', text: '#1e40af', label: '💵 Quote ready — review now' },
+  active: { bg: '#d1fae5', text: '#065f46', label: '📅 On the schedule' },
+  en_route: { bg: '#e0e7ff', text: '#3730a3', label: '🚗 Crew on the way' },
   in_progress: { bg: '#fce7f3', text: '#9d174d', label: '🔧 In progress' },
   completed: { bg: '#f0fdf4', text: '#166534', label: '✅ Completed' },
   cancelled: { bg: '#fef2f2', text: '#991b1b', label: '❌ Cancelled' },
-  manual_match: { bg: '#fff7ed', text: '#9a3412', label: '🤝 Being matched manually' },
+  manual_match: { bg: '#fff7ed', text: '#9a3412', label: '🤝 We’ll call you to schedule' },
 };
 
 const labelStyle: React.CSSProperties = {
@@ -360,54 +361,26 @@ export default function Dashboard() {
     router.push('/');
   };
 
-  // ── Dev Tools ───────────────────────────────────────────────────
-  const triggerMockClaim = async (jobId: string) => {
-    setActionLoading(true);
-    try {
-      const res = await fetch('/api/admin/jobs/claim-mock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId }),
-      });
-      if (res.ok) {
-        await fetchJobs();
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Failed to mock claim job');
-      }
-    } catch {
-      alert('Network error during mock claim');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const triggerStatusAdvance = async (jobId: string, status: string) => {
+  // Customer-initiated cancel (allowed before work starts)
+  const cancelJob = async (jobId: string) => {
     setActionLoading(true);
     try {
       const res = await fetch('/api/jobs/status', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId, status }),
+        body: JSON.stringify({ jobId, status: 'cancelled' }),
       });
       if (res.ok) {
         await fetchJobs();
       } else {
         const data = await res.json();
-        alert(data.error || 'Failed to update job status');
+        alert(data.message || data.error || 'Failed to cancel');
       }
     } catch {
-      alert('Network error during status update');
+      alert('Network error while cancelling');
     } finally {
       setActionLoading(false);
     }
-  };
-
-  const getNextStatus = (currentStatus: string) => {
-    if (currentStatus === 'active') return { status: 'en_route', label: 'Mark En Route' };
-    if (currentStatus === 'en_route') return { status: 'in_progress', label: 'Mark In Progress' };
-    if (currentStatus === 'in_progress') return { status: 'completed', label: 'Mark Completed' };
-    return null;
   };
 
   const card: React.CSSProperties = { background: '#fff', borderRadius: 16, padding: '20px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 12 };
@@ -553,15 +526,14 @@ export default function Dashboard() {
               <div style={{ ...card, textAlign: 'center', padding: 40 }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>🌱</div>
                 <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>No jobs yet</h3>
-                <p style={{ color: '#64748b', marginBottom: 20 }}>Post your first job and get a pro out today!</p>
-                <a href="/post" style={{ padding: '12px 24px', borderRadius: 12, background: '#059669', color: '#fff', textDecoration: 'none', fontWeight: 700 }}>Post a Job</a>
+                <p style={{ color: '#64748b', marginBottom: 20 }}>Schedule a service or request a free quote — it takes about a minute.</p>
+                <a href="/post" style={{ padding: '12px 24px', borderRadius: 12, background: '#059669', color: '#fff', textDecoration: 'none', fontWeight: 700 }}>Request Service</a>
               </div>
             ) : jobs.map(job => {
               const status = STATUS_COLORS[job.status] || STATUS_COLORS.broadcast;
               const isPending = job.status === 'pending_approval';
               const deadline = job.approvalDeadline ? new Date(job.approvalDeadline) : null;
               const isSelected = selectedJob === job.id;
-              const nextStatus = getNextStatus(job.status);
               const cardStyle = {
                 ...card,
                 border: isSelected ? '2px solid #059669' : '1px solid #e2e8f0',
@@ -580,10 +552,12 @@ export default function Dashboard() {
                           <span style={{ fontSize: 18, fontWeight: 800, color: '#d97706' }}>
                             ${(job.quotedPrice + Math.max(job.quotedPrice * 0.13, 5.0) + 2.5).toFixed(2)}
                           </span>
-                          <span style={{ fontSize: 9, color: '#d97706', display: 'block', fontWeight: 700 }}>PRO QUOTE</span>
+                          <span style={{ fontSize: 9, color: '#d97706', display: 'block', fontWeight: 700 }}>YOUR QUOTE</span>
                         </div>
-                      ) : (
+                      ) : job.customerTotal > 0 ? (
                         <span style={{ fontSize: 18, fontWeight: 800, color: '#059669' }}>${job.customerTotal.toFixed(2)}</span>
+                      ) : (
+                        <span style={{ fontSize: 12, fontWeight: 800, color: '#d97706' }}>Quote pending</span>
                       )}
                     </div>
                   </div>
@@ -609,34 +583,36 @@ export default function Dashboard() {
                       </div>
                       {job.provider.bio && <p style={{ fontSize: 13, color: '#475569', marginBottom: 12, lineHeight: 1.5 }}>{job.provider.bio}</p>}
 
-                      {/* Custom quote details */}
+                      {/* Quote details */}
                       {job.quotedPrice && job.quotedPrice > 0 && (
                         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '12px 14px', marginBottom: 12, fontSize: 12, color: '#b45309', fontWeight: 700, textAlign: 'left' }}>
-                          💰 Provider submitted a custom price quote:
-                          <div style={{ fontSize: 15, marginTop: 4, color: '#b45309', fontWeight: 800 }}>
-                            ${job.quotedPrice.toFixed(2)} payout (${(job.quotedPrice + Math.max(job.quotedPrice * 0.13, 5.0) + 2.5).toFixed(2)} total cost)
+                          💵 Your quote for this job:
+                          <div style={{ fontSize: 18, marginTop: 4, color: '#b45309', fontWeight: 800 }}>
+                            ${(job.quotedPrice + Math.max(job.quotedPrice * 0.13, 5.0) + 2.5).toFixed(2)} total
                           </div>
                           <div style={{ fontSize: 10, fontWeight: 500, color: '#d97706', marginTop: 2 }}>
-                            (Original estimate: ${job.price.toFixed(2)} payout / ${job.customerTotal.toFixed(2)} total)
+                            Includes service &amp; processing fees • Pay after the work is done
                           </div>
                         </div>
                       )}
 
-                      {/* Countdown timer */}
+                      {/* Countdown timer (only legacy price adjustments have a deadline) */}
                       {deadline && <CountdownTimer deadline={deadline} />}
 
                       {/* Action buttons */}
                       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                         <button disabled={actionLoading} onClick={(e) => { e.stopPropagation(); approveProvider(job.id); }}
                           style={{ flex: 1, padding: '12px', borderRadius: 10, border: 'none', background: '#059669', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-                          ✅ Approve
+                          ✅ Accept {job.quotedPrice && job.quotedPrice > 0 ? 'Quote' : ''}
                         </button>
                         <button disabled={actionLoading} onClick={(e) => { e.stopPropagation(); vetoProvider(job.id); }}
                           style={{ flex: 1, padding: '12px', borderRadius: 10, border: '1px solid #ef4444', background: '#fff', color: '#ef4444', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-                          ❌ Choose Someone Else
+                          Decline
                         </button>
                       </div>
-                      <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 8 }}>Auto-approves if no action taken • Veto {job.vetoCount}/3</div>
+                      <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 8 }}>
+                        {job.quotedPrice && job.quotedPrice > 0 ? 'Nothing happens until you accept — declining closes the request.' : 'Declining closes the request.'}
+                      </div>
                     </div>
                   )}
 
@@ -774,56 +750,25 @@ export default function Dashboard() {
                     </div>
                   )}
 
-                  {/* DEV TOOLS DEV Simulation Buttons */}
-                  <div style={{ borderTop: '1px dashed #e2e8f0', marginTop: 12, paddingTop: 12 }}>
-                    {job.status === 'broadcast' && (
+                  {/* Cancel request (before work starts) */}
+                  {['pending_claim', 'active'].includes(job.status) && (
+                    <div style={{ borderTop: '1px dashed #e2e8f0', marginTop: 12, paddingTop: 12 }}>
                       <button
                         disabled={actionLoading}
-                        onClick={(e) => { e.stopPropagation(); triggerMockClaim(job.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm('Cancel this request?')) cancelJob(job.id);
+                        }}
                         style={{
-                          width: '100%',
-                          padding: '10px',
-                          borderRadius: '10px',
-                          border: 'none',
-                          background: '#1e293b',
-                          color: '#38bdf8',
-                          fontWeight: 700,
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px'
+                          width: '100%', padding: '10px', borderRadius: '10px',
+                          border: '1px solid #fecaca', background: '#fff', color: '#b91c1c',
+                          fontWeight: 700, fontSize: '12px', cursor: 'pointer',
                         }}
                       >
-                        📡 🧪 Dev Tool: Mock Provider Claim
+                        Cancel request
                       </button>
-                    )}
-
-                    {nextStatus && (
-                      <button
-                        disabled={actionLoading}
-                        onClick={(e) => { e.stopPropagation(); triggerStatusAdvance(job.id, nextStatus.status); }}
-                        style={{
-                          width: '100%',
-                          padding: '10px',
-                          borderRadius: '10px',
-                          border: 'none',
-                          background: '#1e293b',
-                          color: '#34d399',
-                          fontWeight: 700,
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        🚜 🧪 Dev Tool: {nextStatus.label}
-                      </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

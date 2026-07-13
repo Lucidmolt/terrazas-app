@@ -134,6 +134,9 @@ model Job {
   status           String    @default("broadcast")
   // broadcast → pending_claim → active → en_route → in_progress → completed | cancelled
   serviceType      String    @default("mowing")
+  requestType      String    @default("book") // book (fixed-price booking) | quote (business responds with price)
+  preferredDate    DateTime? // Customer's requested service date
+  timeWindow       String?   // morning | afternoon | evening | anytime
   tier             String    @default("basic") // basic | premium
   zipCode          String
   address          String    @default("")

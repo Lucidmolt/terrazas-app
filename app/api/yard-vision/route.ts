@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { analyzeYard, checkAIHealth } from '@/lib/yard-vision';
+import { requireAuth } from '@/lib/api-auth';
 
 // POST /api/yard-vision — analyze a yard photo
 export async function POST(request: Request) {
+  // SECURITY: Require authentication — this writes YardScan rows and can mutate job prices
+  const { dbUser, error: authError } = await requireAuth();
+  if (authError) return authError;
+
   try {
     const body = await request.json();
     const { image, mimeType, jobId } = body;
@@ -15,14 +20,20 @@ export async function POST(request: Request) {
     // Run AI analysis
     const result = await analyzeYard(image, mimeType || 'image/jpeg');
 
+    // Valid YARD_VISION_PROVIDER values: 'lmstudio' | 'ollama' | 'cloud' ('lmstudio' and 'ollama' are local)
+    const visionProvider = process.env.YARD_VISION_PROVIDER || 'lmstudio';
+    const isLocalProvider = visionProvider === 'lmstudio' || visionProvider === 'ollama';
+
     // Save scan to database
     const scan = await db.yardScan.create({
       data: {
         jobId: jobId || null,
         imageUrl: `data:${mimeType || 'image/jpeg'};base64,${image.substring(0, 50)}...`, // Store reference, not full image
-        provider: process.env.YARD_VISION_PROVIDER || 'local',
-        modelUsed: process.env.YARD_VISION_PROVIDER === 'local'
-          ? (process.env.OLLAMA_MODEL || 'llava:13b')
+        provider: visionProvider,
+        modelUsed: isLocalProvider
+          ? (visionProvider === 'ollama'
+              ? (process.env.OLLAMA_MODEL || 'llava:13b')
+              : (process.env.LMSTUDIO_MODEL || 'lmstudio'))
           : (process.env.ANTHROPIC_API_KEY ? 'claude' : 'gemini'),
         conditionScore: result.conditionScore,
         estimatedEffort: result.estimatedEffort,
@@ -31,17 +42,21 @@ export async function POST(request: Request) {
       },
     });
 
-    // If linked to a job, update the job with AI findings
+    // If linked to a job, update the job with AI findings — but only if the job
+    // belongs to the authenticated user (never let callers mutate others' job prices)
     if (jobId) {
-      await db.job.update({
-        where: { id: jobId },
-        data: {
-          conditionNotes: result.recommendation,
-          aiWarning: result.warning,
-          aiProvider: process.env.YARD_VISION_PROVIDER || 'local',
-          price: { increment: result.priceAdjustment },
-        },
-      });
+      const job = await db.job.findUnique({ where: { id: jobId } });
+      if (job && dbUser && job.customerId === dbUser.id) {
+        await db.job.update({
+          where: { id: jobId },
+          data: {
+            conditionNotes: result.recommendation,
+            aiWarning: result.warning,
+            aiProvider: visionProvider,
+            price: { increment: result.priceAdjustment },
+          },
+        });
+      }
     }
 
     return NextResponse.json({

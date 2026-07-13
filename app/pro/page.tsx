@@ -6,6 +6,8 @@ interface JobItem {
   id: string; status: string; serviceType: string; tier: string; zipCode: string;
   address: string; price: number; providerPayout: number; customerTotal: number;
   aiWarning: boolean; conditionNotes: string | null; createdAt: string;
+  requestType?: string; preferredDate?: string | null; timeWindow?: string | null;
+  customerNotes?: string | null;
   completedAt?: string; cancelledAt?: string;
   photoFrontUrl: string | null;
   photoBackUrl: string | null;
@@ -263,9 +265,13 @@ export default function ProDashboard() {
     };
   }, []);
 
-  const claimJob = async (jobId: string) => {
-    setClaiming(jobId);
+  const claimJob = async (jobId: string, isQuoteRequest = false) => {
     const customPrice = customQuotes[jobId] ? parseFloat(customQuotes[jobId]) : undefined;
+    if (isQuoteRequest && (!customPrice || customPrice <= 0)) {
+      alert('Enter a price to send the customer a quote.');
+      return;
+    }
+    setClaiming(jobId);
     try {
       const res = await fetch(`/api/jobs/${jobId}/claim`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -275,9 +281,9 @@ export default function ProDashboard() {
         }),
       });
       const data = await res.json();
-      if (!data.success && !res.ok) alert(data.error || 'Job unavailable');
+      if (!data.success && !res.ok) alert(data.message || data.error || 'Job unavailable');
       else { setJobs(prev => prev.filter(j => j.id !== jobId)); fetchJobs(); }
-    } catch { alert('Failed to claim'); } finally { setClaiming(null); }
+    } catch { alert('Failed to accept'); } finally { setClaiming(null); }
   };
 
   const updateStatus = async (jobId: string, newStatus: string) => {
@@ -566,17 +572,18 @@ export default function ProDashboard() {
             </p>
           </div>
         )}
-        {/* BROADCAST FEED */}
+        {/* NEW REQUESTS FEED */}
         {tab === 'feed' && (
           jobs.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
-              <div style={{ fontSize: 48 }}>📡</div>
-              <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 12 }}>No jobs right now</h2>
-              <p style={{ fontSize: 13 }}>New jobs appear automatically. Keep this open.</p>
+              <div style={{ fontSize: 48 }}>🌱</div>
+              <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 12 }}>No new requests</h2>
+              <p style={{ fontSize: 13 }}>New bookings and quote requests appear here automatically.</p>
             </div>
           ) : jobs.map(job => {
             const statusInfo = JOB_STATUS_LABELS[job.status] || { label: job.status, color: '' };
             const isHighlighted = highlightedJobId === job.id;
+            const isQuoteRequest = job.requestType === 'quote';
             return (
               <div
                 key={job.id}
@@ -593,13 +600,23 @@ export default function ProDashboard() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                   <div>
-                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: '#059669', color: '#fff', fontWeight: 700 }}>{statusInfo.label}</span>
-                    {job.status === 'pending_claim' && (
-                      <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: '#38bdf8', color: '#0f172a', fontWeight: 800, marginLeft: 8 }}>⭐ Direct Offer</span>
-                    )}
-                    <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 8 }}>{job.serviceType?.replace('_', ' ')} — {job.tier}</h3>
+                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: isQuoteRequest ? '#f59e0b' : '#38bdf8', color: '#0f172a', fontWeight: 800 }}>
+                      {isQuoteRequest ? '💵 Quote Requested' : '🆕 New Booking'}
+                    </span>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 8, textTransform: 'capitalize' }}>{job.serviceType?.replace(/_/g, ' ')}{isQuoteRequest ? '' : ` — ${job.tier}`}</h3>
                     <p style={{ fontSize: 13, color: '#94a3b8' }}>📍 {job.address || job.zipCode}</p>
-                    
+                    {job.preferredDate && (
+                      <p style={{ fontSize: 12, color: '#38bdf8', fontWeight: 700, margin: '4px 0 0' }}>
+                        {/* timeZone UTC: preferredDate is a date-only value — local rendering shifts it a day */}
+                        📅 Wants: {new Date(job.preferredDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })}{job.timeWindow && job.timeWindow !== 'anytime' ? ` (${job.timeWindow})` : ''}
+                      </p>
+                    )}
+                    {job.customerNotes && (
+                      <p style={{ fontSize: 12, color: '#cbd5e1', margin: '6px 0 0', lineHeight: 1.5, background: '#0f172a', borderRadius: 8, padding: '8px 10px', border: '1px solid #334155' }}>
+                        📝 {job.customerNotes}
+                      </p>
+                    )}
+
                     {/* Job Photos */}
                     {(job.photoFrontUrl || job.photoBackUrl) && (
                       <div style={{ display: 'flex', gap: 10, marginTop: 12, marginBottom: 12 }}>
@@ -617,39 +634,56 @@ export default function ProDashboard() {
                     )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: '#34d399' }}>${job.providerPayout || job.price}</div>
-                    <div style={{ fontSize: 10, color: '#64748b' }}>YOUR PAYOUT</div>
+                    {isQuoteRequest ? (
+                      <>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: '#f59e0b' }}>NEEDS PRICE</div>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>SEND A QUOTE</div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 28, fontWeight: 900, color: '#34d399' }}>${job.providerPayout || job.price}</div>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>YOUR PAYOUT</div>
+                      </>
+                    )}
                   </div>
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
-                    CUSTOM QUOTE PRICE (OPTIONAL)
+                  <label style={{ fontSize: 10, fontWeight: 700, color: isQuoteRequest ? '#f59e0b' : '#94a3b8', display: 'block', marginBottom: 4 }}>
+                    {isQuoteRequest ? 'YOUR QUOTE PRICE (REQUIRED)' : 'ADJUST PRICE (OPTIONAL — CUSTOMER MUST ACCEPT)'}
                   </label>
-                  <div style={{ display: 'flex', alignItems: 'center', background: '#0f172a', border: '1px solid #334155', borderRadius: 10, padding: '4px 12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', background: '#0f172a', border: `1px solid ${isQuoteRequest ? '#f59e0b' : '#334155'}`, borderRadius: 10, padding: '4px 12px' }}>
                     <span style={{ color: '#94a3b8', fontSize: 14, marginRight: 4 }}>$</span>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      placeholder={String(job.price)} 
-                      value={customQuotes[job.id] || ''} 
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder={isQuoteRequest ? 'e.g. 350.00' : String(job.price)}
+                      value={customQuotes[job.id] || ''}
                       onChange={(e) => setCustomQuotes(prev => ({ ...prev, [job.id]: e.target.value }))}
                       style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 14, width: '100%', outline: 'none' }}
                     />
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
-                  {[15, 30, 45].map(min => (
-                    <button key={min} onClick={() => setSelectedEta(p => ({ ...p, [job.id]: min }))}
-                      style={{ padding: '10px', borderRadius: 10, border: (selectedEta[job.id] || 30) === min ? '2px solid #059669' : '1px solid #334155', background: (selectedEta[job.id] || 30) === min ? '#059669' : '#0f172a', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                      {min} MIN
-                    </button>
-                  ))}
-                </div>
-                <button onClick={() => claimJob(job.id)} disabled={claiming === job.id}
-                  style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: '#059669', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer', opacity: claiming === job.id ? 0.5 : 1 }}>
-                  {claiming === job.id ? 'CLAIMING...' : `CLAIM — ${selectedEta[job.id] || 30} MIN ETA`}
+                {!isQuoteRequest && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
+                    {[15, 30, 45].map(min => (
+                      <button key={min} onClick={() => setSelectedEta(p => ({ ...p, [job.id]: min }))}
+                        style={{ padding: '10px', borderRadius: 10, border: (selectedEta[job.id] || 30) === min ? '2px solid #059669' : '1px solid #334155', background: (selectedEta[job.id] || 30) === min ? '#059669' : '#0f172a', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                        {min} MIN
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button onClick={() => claimJob(job.id, isQuoteRequest)} disabled={claiming === job.id}
+                  style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: isQuoteRequest ? '#f59e0b' : '#059669', color: isQuoteRequest ? '#0f172a' : '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer', opacity: claiming === job.id ? 0.5 : 1 }}>
+                  {claiming === job.id
+                    ? 'SENDING...'
+                    : isQuoteRequest
+                      ? 'SEND QUOTE TO CUSTOMER'
+                      : customQuotes[job.id]
+                        ? 'SEND ADJUSTED PRICE'
+                        : 'ACCEPT BOOKING'}
                 </button>
               </div>
             );
@@ -744,7 +778,7 @@ export default function ProDashboard() {
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: 20, fontWeight: 800, color: '#34d399' }}>${job.providerPayout || job.price}</div>
                       <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: job.status === 'pending_approval' ? '#fef3c7' : '#059669', color: job.status === 'pending_approval' ? '#92400e' : '#fff', fontWeight: 700 }}>
-                        {job.status === 'pending_approval' ? '⏳ Awaiting approval' : job.status.replace('_', ' ').toUpperCase()}
+                        {job.status === 'pending_approval' ? '⏳ Quote sent — awaiting customer' : job.status.replace('_', ' ').toUpperCase()}
                       </span>
                     </div>
                   </div>

@@ -10,11 +10,13 @@ export async function POST(request: Request) {
   if (authError) return authError;
 
   try {
-    const { jobId, providerId, amount } = await request.json();
+    // SECURITY: providerId/customerId from the body are ignored — the provider is
+    // derived from the job record and the customer is the authenticated user.
+    const { jobId, amount } = await request.json();
 
-    if (!jobId || !providerId || !amount) {
+    if (!jobId || !amount) {
       return NextResponse.json(
-        { error: 'jobId, providerId, and amount are required' },
+        { error: 'jobId and amount are required' },
         { status: 400 }
       );
     }
@@ -40,6 +42,12 @@ export async function POST(request: Request) {
     if (job.customerId !== customerId) {
       return NextResponse.json({ error: 'Not authorized to tip on this job' }, { status: 403 });
     }
+    if (!job.providerId) {
+      return NextResponse.json({ error: 'Job has no assigned provider to tip' }, { status: 400 });
+    }
+
+    // Tip recipient is always the provider who did the job
+    const providerId = job.providerId;
 
     // Record the tip (payment processing handled separately via Stripe when configured)
     const tip = await db.tip.create({

@@ -3,7 +3,8 @@ import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/api-auth';
 import { geocodeAddress } from '@/lib/google-maps';
 import { calculateDynamicPrice } from '@/lib/pricing';
-import { broadcastJobToProviders } from '@/lib/notifications';
+import { getBusinessProvider } from '@/lib/business-server';
+import { isZipServed, BUSINESS } from '@/lib/business';
 
 // GET /api/subscriptions — list active subscriptions for the logged-in customer
 export async function GET() {
@@ -49,20 +50,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid frequency. Choose 7, 10, 14, or 30 days.' }, { status: 400 });
     }
 
-    // Resolve geocoding if coords are missing
-    let zipCode = '';
-    if (!latitude || !longitude) {
+    // Resolve zip code: prefer the client-provided value, fall back to geocoding
+    // the address (also fills missing coords), and only then the default.
+    let zipCode: string = typeof body.zipCode === 'string' ? body.zipCode.trim() : '';
+    if (!latitude || !longitude || !zipCode) {
       const geo = await geocodeAddress(address);
       if (geo) {
-        latitude = geo.lat;
-        longitude = geo.lng;
+        latitude = latitude || geo.lat;
+        longitude = longitude || geo.lng;
         placeId = placeId || geo.placeId;
-        zipCode = geo.zipCode;
+        zipCode = zipCode || geo.zipCode;
       }
     }
 
     if (!zipCode) {
       zipCode = '67901';
+    }
+
+    if (!isZipServed(zipCode)) {
+      return NextResponse.json({
+        error: 'OUTSIDE_SERVICE_AREA',
+        message: `We don't currently serve ${zipCode}. Call ${BUSINESS.phone} — we may still be able to help.`,
+      }, { status: 400 });
+    }
+
+    // Single-business mode: recurring service is always with the business
+    const businessProvider = await getBusinessProvider();
+    if (!businessProvider) {
+      return NextResponse.json({
+        error: 'NO_PROVIDER',
+        message: `Online booking is temporarily unavailable. Please call ${BUSINESS.phone}.`,
+      }, { status: 503 });
     }
 
     // Calculate pricing for the first job
@@ -92,7 +110,7 @@ export async function POST(request: Request) {
         longitude: longitude || null,
         placeId: placeId || null,
         frequencyDays: freq,
-        preferredProId: preferredProId || null,
+        preferredProId: businessProvider.id,
         photoFrontUrl: photoFrontUrl || null,
         photoBackUrl: photoBackUrl || null,
         photoExtraUrl: photoExtraUrl || null,
@@ -131,36 +149,29 @@ export async function POST(request: Request) {
         photoFrontUrl: photoFrontUrl || null,
         photoBackUrl: photoBackUrl || null,
         photoExtraUrl: photoExtraUrl || null,
-        status: preferredProId ? 'pending_claim' : 'broadcast',
-        providerId: preferredProId || null,
-        broadcastedAt: !preferredProId ? new Date() : null,
+        preferredDate: body.preferredDate ? new Date(body.preferredDate) : null,
+        timeWindow: body.timeWindow || null,
+        status: 'pending_claim',
+        providerId: businessProvider.id,
+        pendingProId: businessProvider.id,
+        preferredProId: businessProvider.id,
+        broadcastTier: 0,
       },
     });
 
-    // Trigger notification/broadcast for the first job
-    if (!preferredProId) {
-      broadcastJobToProviders(job.id).catch((err) => {
-        console.error('[Subscriptions POST] Broadcast error for job:', err);
-      });
-    } else {
-      const preferredPro = await db.provider.findUnique({
-        where: { id: preferredProId },
-      });
-      if (preferredPro) {
-        await db.notification.create({
-          data: {
-            userId: preferredPro.userId,
-            jobId: job.id,
-            type: 'job_broadcast',
-            channel: 'in_app',
-            title: '⭐ Direct Job Offer (Recurring)',
-            body: `A customer has requested you directly for a recurring ${job.serviceType} at ${job.address.split(',')[0]} ($${job.price.toFixed(2)}). Claim it now!`,
-            isSent: true,
-            sentAt: new Date(),
-          },
-        });
-      }
-    }
+    // Notify the business about the new recurring plan
+    await db.notification.create({
+      data: {
+        userId: businessProvider.userId,
+        jobId: job.id,
+        type: 'new_booking',
+        channel: 'in_app',
+        title: '🔁 New recurring service signup',
+        body: `Recurring ${job.serviceType} every ${freq} days at ${job.address.split(',')[0]} ($${job.price.toFixed(2)}/visit). First visit is waiting for your accept.`,
+        isSent: true,
+        sentAt: new Date(),
+      },
+    });
 
     return NextResponse.json({ subscription, job }, { status: 201 });
   } catch (error: any) {

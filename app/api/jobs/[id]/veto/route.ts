@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { broadcastJobToProviders } from '@/lib/notifications';
 import { requireAuth } from '@/lib/api-auth';
 
-// POST /api/jobs/[id]/veto — Customer vetoes the claiming provider
+// POST /api/jobs/[id]/veto — Customer declines the quote / assigned pro.
+// Single-business mode: a decline closes the request (no rebroadcast).
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -41,86 +41,49 @@ export async function POST(
       return NextResponse.json({ error: 'Veto window has expired. Provider was auto-approved.' }, { status: 410 });
     }
 
-    // Check max vetos (3 per job)
-    if (job.vetoCount >= 3) {
-      return NextResponse.json({
-        error: 'Maximum vetos reached. This job requires manual matching.',
-        status: 'manual_match',
-      }, { status: 429 });
-    }
+    const declinedProviderId = job.providerId!;
 
-    const vetoedProviderId = job.providerId!;
-
-    // Record the veto
+    // Record the decline (kept as a Veto row for feedback analytics)
     await db.veto.create({
       data: {
         jobId,
-        providerId: vetoedProviderId,
+        providerId: declinedProviderId,
         customerId,
         reason: reason || null,
       },
     });
 
-    // Add provider to blocklist
-    const blockedProviders: string[] = JSON.parse(job.blockedProviders || '[]');
-    blockedProviders.push(vetoedProviderId);
-
-    // Update veto reasons tracking
-    const vetoReasons: string[] = JSON.parse(job.vetoReasons || '[]');
-    if (reason) vetoReasons.push(reason);
-
-    // Increment provider's veto count
-    await db.provider.update({
-      where: { id: vetoedProviderId },
-      data: {
-        vetoCount: { increment: 1 },
-        lastVetoAt: new Date(),
-      },
-    });
-
-    // Mark the claim as unsuccessful
-    await db.claim.updateMany({
-      where: { jobId, providerId: vetoedProviderId },
-      data: { wasSuccessful: false },
-    });
-
-    const newVetoCount = job.vetoCount + 1;
-    const newStatus = newVetoCount >= 3 ? 'manual_match' : 'broadcast';
-
-    // Reset job to broadcast (or manual_match if 3 vetos)
+    // Single-business mode: declining the quote/price cancels the request.
+    // The customer can call the business or submit a new request.
     const updatedJob = await db.job.update({
       where: { id: jobId },
       data: {
-        status: newStatus,
-        providerId: null,
-        pendingProId: null,
-        etaMinutes: null,
-        claimedAt: null,
+        status: 'cancelled',
+        cancelledAt: new Date(),
+        cancelReason: reason ? `Customer declined: ${reason}` : 'Customer declined the quote',
         approvalDeadline: null,
-        autoApproved: false,
-        blockedProviders: JSON.stringify(blockedProviders),
-        vetoCount: newVetoCount,
-        vetoReasons: JSON.stringify(vetoReasons),
-        broadcastedAt: newStatus === 'broadcast' ? new Date() : null,
         quotedPrice: null,
       },
     });
 
-    // Re-broadcast if still open (non-blocking)
-    if (newStatus === 'broadcast') {
-      broadcastJobToProviders(jobId).catch((err) => {
-        console.error('Re-broadcast error:', err);
-      });
-    }
+    // Let the business know their quote was declined (non-blocking)
+    db.notification.create({
+      data: {
+        userId: (await db.provider.findUnique({ where: { id: declinedProviderId }, select: { userId: true } }))!.userId,
+        jobId,
+        type: 'quote_declined',
+        channel: 'in_app',
+        title: 'Quote declined',
+        body: `The customer passed on your quote for ${job.serviceType} at ${job.address}.${reason ? ` Reason: ${reason}` : ''}`,
+        isSent: true,
+        sentAt: new Date(),
+      },
+    }).catch((err) => console.error('[Veto] Notification error:', err));
 
     return NextResponse.json({
       job: updatedJob,
-      vetoCount: newVetoCount,
-      maxVetos: 3,
-      status: newStatus,
-      message: newStatus === 'broadcast'
-        ? 'Provider removed. Job is being re-broadcasted to other providers.'
-        : 'Maximum vetos reached. Our team will help match you with a provider.',
+      status: 'cancelled',
+      message: 'No problem — the request has been closed. Submit a new request anytime.',
     });
 
   } catch (error: any) {

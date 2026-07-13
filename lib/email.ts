@@ -9,6 +9,7 @@
 //   - Welcome email → new user
 
 import { Resend } from 'resend';
+import { APP_URL } from '@/lib/business';
 
 const resendKey = process.env.RESEND_API_KEY || '';
 const fromEmail = process.env.RESEND_FROM_EMAIL || 'Terrazas <alerts@updates.terrazas.app>';
@@ -32,26 +33,46 @@ function emailWrapper(content: string): string {
   `;
 }
 
-// ── Send Email (base function) ──────────────────────────────────────
-async function sendEmail(to: string, subject: string, html: string): Promise<{ success: boolean; error?: string }> {
+// ── Send Raw Email ──────────────────────────────────────────────────
+// The ONE place the app talks to Resend. All email senders (this module,
+// lib/notifications.ts, lib/dispatch.ts) route through here so email is
+// reconfigured by setting exactly two env vars:
+//   RESEND_API_KEY    — API key from resend.com
+//   RESEND_FROM_EMAIL — verified sender, e.g. 'Terrazas <alerts@yourdomain.com>'
+export async function sendRawEmail(
+  to: string,
+  subject: string,
+  html: string,
+  text?: string
+): Promise<{ success: boolean; error?: string }> {
   if (!resend) {
-    console.log(`[Email] Mock → ${to}: ${subject}`);
+    console.log(`[Email] Mock (no RESEND_API_KEY) → ${to}: ${subject}`);
     return { success: true };
   }
 
   try {
-    await resend.emails.send({
+    const { error } = await resend.emails.send({
       from: fromEmail,
       to,
       subject,
-      html: emailWrapper(html),
+      html,
+      ...(text ? { text } : {}),
     });
+    if (error) {
+      console.error(`[Email] Failed → ${to}: ${JSON.stringify(error)}`);
+      return { success: false, error: JSON.stringify(error) };
+    }
     console.log(`[Email] Sent → ${to}: ${subject}`);
     return { success: true };
   } catch (error: any) {
     console.error(`[Email] Failed → ${to}: ${error.message}`);
     return { success: false, error: error.message };
   }
+}
+
+// ── Send Email (branded wrapper) ────────────────────────────────────
+async function sendEmail(to: string, subject: string, html: string): Promise<{ success: boolean; error?: string }> {
+  return sendRawEmail(to, subject, emailWrapper(html));
 }
 
 // ── Job Claimed — Notify Customer ───────────────────────────────────
@@ -81,7 +102,7 @@ export async function sendJobClaimedEmail(
       </tr>
     </table>
 
-    <p style="font-size: 12px; color: #94a3b8; margin: 20px 0 0;">Track your service in real-time at <a href="https://terrazas.app/dashboard" style="color: #059669; font-weight: 700;">terrazas.app/dashboard</a></p>
+    <p style="font-size: 12px; color: #94a3b8; margin: 20px 0 0;">Track your service in real-time at <a href="${APP_URL}/dashboard" style="color: #059669; font-weight: 700;">terrazas.app/dashboard</a></p>
   `);
 }
 
@@ -133,7 +154,7 @@ export async function sendProviderApprovedEmail(
       <li style="margin-bottom: 8px;">Start accepting jobs in your area!</li>
     </ol>
 
-    <a href="https://terrazas.app/pro" style="display: block; text-align: center; padding: 14px; background: #059669; color: #fff; border-radius: 12px; font-weight: 800; font-size: 15px; text-decoration: none; margin-top: 24px;">Open Pro Dashboard →</a>
+    <a href="${APP_URL}/pro" style="display: block; text-align: center; padding: 14px; background: #059669; color: #fff; border-radius: 12px; font-weight: 800; font-size: 15px; text-decoration: none; margin-top: 24px;">Open Pro Dashboard →</a>
   `);
 }
 
@@ -154,8 +175,39 @@ export async function sendPayoutEmail(
       ${parseFloat(fee) > 0 ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Instant fee: -$${fee}</div>` : ''}
     </div>
 
-    <p style="font-size: 12px; color: #94a3b8; text-align: center;">View your full earnings history at <a href="https://terrazas.app/pro" style="color: #059669; font-weight: 700;">terrazas.app/pro</a></p>
+    <p style="font-size: 12px; color: #94a3b8; text-align: center;">View your full earnings history at <a href="${APP_URL}/pro" style="color: #059669; font-weight: 700;">terrazas.app/pro</a></p>
   `);
+}
+
+// ── New Request — Notify the Business ───────────────────────────────
+export async function sendNewRequestEmail(
+  businessEmail: string,
+  opts: {
+    requestType: string // 'book' | 'quote'
+    serviceName: string
+    address: string
+    preferredDate?: string
+    customerName?: string
+    total?: string // set for fixed-price bookings
+  }
+) {
+  const isQuote = opts.requestType === 'quote'
+  const subject = isQuote
+    ? `📋 New quote request — ${opts.serviceName}`
+    : `🌱 New booking — ${opts.serviceName}`
+  return sendEmail(businessEmail, subject, `
+    <h2 style="font-size: 20px; font-weight: 800; color: #0f172a; margin: 0 0 8px;">${isQuote ? 'New Quote Request' : 'New Booking'}</h2>
+    <p style="font-size: 14px; color: #64748b; margin: 0 0 24px;">${opts.customerName || 'A customer'} just ${isQuote ? 'requested a quote' : 'booked a service'} on your site.</p>
+
+    <table style="width: 100%; font-size: 14px; color: #334155;">
+      <tr><td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">Service</td><td style="padding: 8px 0; text-align: right; font-weight: 700;">${opts.serviceName}</td></tr>
+      <tr><td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">📍 Address</td><td style="padding: 8px 0; text-align: right; font-weight: 700;">${opts.address}</td></tr>
+      ${opts.preferredDate ? `<tr><td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">📅 Preferred date</td><td style="padding: 8px 0; text-align: right; font-weight: 700;">${opts.preferredDate}</td></tr>` : ''}
+      ${opts.total ? `<tr><td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">💵 Total</td><td style="padding: 8px 0; text-align: right; font-weight: 700;">$${opts.total}</td></tr>` : ''}
+    </table>
+
+    <a href="${APP_URL}/pro" style="display: block; text-align: center; padding: 14px; background: #059669; color: #fff; border-radius: 12px; font-weight: 800; font-size: 15px; text-decoration: none; margin-top: 24px;">${isQuote ? 'Review & Send Quote →' : 'Review & Accept →'}</a>
+  `)
 }
 
 // ── Welcome Email — New User ────────────────────────────────────────
@@ -174,7 +226,7 @@ export async function sendWelcomeEmail(email: string, name: string) {
       </div>
     </div>
 
-    <a href="https://terrazas.app" style="display: block; text-align: center; padding: 14px; background: #059669; color: #fff; border-radius: 12px; font-weight: 800; font-size: 15px; text-decoration: none;">Book Your First Service →</a>
+    <a href="${APP_URL}" style="display: block; text-align: center; padding: 14px; background: #059669; color: #fff; border-radius: 12px; font-weight: 800; font-size: 15px; text-decoration: none;">Book Your First Service →</a>
   `);
 }
 

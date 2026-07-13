@@ -33,7 +33,7 @@ export default function TermsOfServicePage() {
         {/* Title */}
         <h2 style={{ fontSize: 32, fontWeight: 800, color: '#0f172a', marginBottom: 8 }}>Terms of Service</h2>
         <p style={{ fontSize: 14, color: '#64748b', marginBottom: 32 }}>
-          Last updated: {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          Last updated: July 13, 2026
         </p>
 
         {/* Tab switcher */}

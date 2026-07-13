@@ -1,685 +1,277 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { TIERS, BROADCAST_WINDOW_SECONDS } from '@/lib/constants';
 import AuthModal from '@/components/AuthModal';
-import { Zap, ShieldCheck, MapPin, CheckCircle2, ArrowRight, Star, TrendingUp, Users } from 'lucide-react';
-
-type View = 'zip' | 'provider-choice' | 'preferred' | 'tiers' | 'searching' | 'success';
-
-interface ProviderInfo {
-  id: string;
-  businessName: string;
-  rating: number;
-  reviewCount: number;
-  isVerified: boolean;
-  isActive: boolean;
-  avatarUrl: string | null;
-  ownerName: string | null;
-}
+import { BUSINESS, SERVICES, SERVICE_AREAS, isZipServed } from '@/lib/business';
+import { ShieldCheck, Phone, Star, MapPin, ArrowRight, Camera, CalendarCheck, ClipboardList, Truck } from 'lucide-react';
 
 export default function HomePage() {
-  const [view, setView] = useState<View>('zip');
   const [zip, setZip] = useState('');
-  const [activeZip, setActiveZip] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [providerCount, setProviderCount] = useState(0);
-  const [selectedTier, setSelectedTier] = useState<'basic' | 'premium'>('premium');
-  const [address, setAddress] = useState('');
-  const [countdown, setCountdown] = useState(BROADCAST_WINDOW_SECONDS);
-  const [countdownActive, setCountdownActive] = useState(false);
-  const [mapScale, setMapScale] = useState(1);
-  const [pinVisible, setPinVisible] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-  const [mapCenter, setMapCenter] = useState({ lat: 37.0439, lng: -100.921 }); // Liberal, KS default
-  const [mapZoom, setMapZoom] = useState(13);
+  const [zipResult, setZipResult] = useState<'served' | 'unserved' | null>(null);
   const [authModalConfig, setAuthModalConfig] = useState<{
     isOpen: boolean;
     initialRole?: 'customer' | 'pro';
     initialView?: 'choose' | 'signin' | 'signup';
   }>({ isOpen: false });
-  const [scanScore, setScanScore] = useState<number | null>(null);
 
   const openAuth = useCallback((role?: 'customer' | 'pro', view?: 'choose' | 'signin' | 'signup') => {
-    setAuthModalConfig({
-      isOpen: true,
-      initialRole: role,
-      initialView: view,
-    });
+    setAuthModalConfig({ isOpen: true, initialRole: role, initialView: view });
   }, []);
 
-  // Check for scan query parameter or local storage
+  // Handle ?login=true (401 redirects) and persist a Yard Vision scan score for /post
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const scan = params.get('scan');
-      if (scan) {
-        const score = parseFloat(scan);
-        setScanScore(score);
-        localStorage.setItem('terrazas_scan_score', scan);
-      } else {
-        const stored = localStorage.getItem('terrazas_scan_score');
-        if (stored) {
-          setScanScore(parseFloat(stored));
-        }
-      }
-    }
-  }, []);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('login') === 'true') openAuth('customer', 'signin');
+    const scan = params.get('scan');
+    if (scan) localStorage.setItem('terrazas_scan_score', scan);
+  }, [openAuth]);
 
-  // ── Hydration-safe mount ──────────────────────────────────────────
-  useEffect(() => {
-    setMounted(true);
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('login') === 'true') {
-        openAuth('customer', 'signin');
-      }
-    }
-    // Auto-detect location on mount
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const { latitude, longitude } = pos.coords;
-          setMapCenter({ lat: latitude, lng: longitude });
-
-          // Reverse geocode via server-side API (keeps key off the browser)
-          try {
-            const res = await fetch(`/api/geo/reverse?lat=${latitude}&lng=${longitude}`);
-            const data = await res.json();
-            if (data.zip) {
-              setZip(data.zip);
-              // Auto-trigger provider check
-              setTimeout(async () => {
-                try {
-                  const pRes = await fetch(`/api/providers?zip=${data.zip}`);
-                  const pData = await pRes.json();
-                  setActiveZip(data.zip);
-                  setProviders(pData.providers || []);
-                  setProviderCount(pData.count || 0);
-                  setView('provider-choice');
-                  setMapScale(1.2);
-                  setPinVisible(true);
-                  setMapZoom(15);
-                } catch {}
-              }, 300);
-            }
-          } catch {} // Silent fail — user can still type manually
-        },
-        () => {}, // Denied or error — keep Liberal, KS default
-        { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
-      );
-    }
-  }, []);
-
-  // ── Broadcast Countdown Timer ────────────────────────────────────
-  useEffect(() => {
-    if (!countdownActive || countdown <= 0) return;
-    const interval = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) { setCountdownActive(false); return 0; }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [countdownActive, countdown]);
-
-  // ── Poll for Job Claim (replaces Supabase realtime) ──────────────
-  useEffect(() => {
-    if (!jobId) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/jobs?customerId=demo`);
-        const data = await res.json();
-        const job = data.jobs?.find((j: any) => j.id === jobId);
-        if (job && (job.status === 'active' || job.status === 'en_route')) {
-          setView('success');
-          setCountdownActive(false);
-        }
-      } catch { /* polling failure is non-fatal */ }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [jobId]);
-
-  // ── Check Zip Code & Fetch Providers ─────────────────────────────
-  const checkZip = useCallback(async () => {
+  const checkZip = useCallback(() => {
     if (zip.length < 5) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/providers?zip=${zip}`);
-      const data = await res.json();
-
-      setActiveZip(zip);
-      setProviders(data.providers || []);
-      setProviderCount(data.count || 0);
-      setView('provider-choice');
-      setMapScale(1.2);
-      setPinVisible(true);
-      setMapZoom(15);
-    } catch (err) {
-      console.error('[Terrazas] checkZip failed:', err);
-    } finally {
-      setLoading(false);
-    }
+    setZipResult(isZipServed(zip) ? 'served' : 'unserved');
   }, [zip]);
 
-  // ── Confirm Broadcast Order ──────────────────────────────────────
-  const confirmBroadcast = useCallback(async () => {
-    const params = new URLSearchParams({
-      zip: activeZip,
-      tier: selectedTier,
-      address: address || '',
-      ...(scanScore !== null ? { scan: scanScore.toString() } : {}),
-    });
+  const bookService = (serviceId: string) => {
+    const params = new URLSearchParams({ service: serviceId });
+    if (zip.length === 5) params.set('zip', zip);
     window.location.href = `/post?${params.toString()}`;
-  }, [activeZip, address, selectedTier, scanScore]);
-
-  // ── Select Specific Provider ─────────────────────────────────────
-  const selectSpecificPro = useCallback(
-    async (provider: ProviderInfo) => {
-      const params = new URLSearchParams({
-        zip: activeZip,
-        tier: selectedTier,
-        address: address || '',
-        providerId: provider.id,
-        ...(scanScore !== null ? { scan: scanScore.toString() } : {}),
-      });
-      window.location.href = `/post?${params.toString()}`;
-    },
-    [activeZip, address, selectedTier, scanScore]
-  );
-
-  const goHome = useCallback(() => {
-    setView('zip');
-    setMapScale(1);
-    setPinVisible(false);
-    setZip('');
-    setActiveZip('');
-    setJobId(null);
-    setCountdownActive(false);
-    setCountdown(BROADCAST_WINDOW_SECONDS);
-  }, []);
-
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Google Maps JS API — loads once, renders live map, works with referrer restrictions
-  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || '';
-  const mapContainerRef = React.useRef<HTMLDivElement>(null);
-  const mapInstanceRef = React.useRef<any>(null);
-
-  useEffect(() => {
-    if (!mounted || !mapContainerRef.current || !mapsKey) return;
-    // Only load the script once
-    if (!(window as any).google?.maps) {
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}`;
-      script.async = true;
-      script.onload = () => initMap();
-      document.head.appendChild(script);
-    } else {
-      initMap();
-    }
-
-    function initMap() {
-      if (!mapContainerRef.current || mapInstanceRef.current) return;
-      mapInstanceRef.current = new (window as any).google.maps.Map(mapContainerRef.current, {
-        center: { lat: mapCenter.lat, lng: mapCenter.lng },
-        zoom: mapZoom,
-        disableDefaultUI: true,
-        gestureHandling: 'none',
-        zoomControl: false,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
-        keyboardShortcuts: false,
-        clickableIcons: false,
-        styles: [
-          { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-          { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-          { featureType: 'all', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-        ],
-      });
-    }
-  }, [mounted, mapsKey]);
-
-  // Update map center/zoom when they change
-  useEffect(() => {
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.panTo({ lat: mapCenter.lat, lng: mapCenter.lng });
-      mapInstanceRef.current.setZoom(mapZoom);
-    }
-  }, [mapCenter, mapZoom]);
-
   return (
-    <div className="flex flex-col md:flex-row h-screen w-screen bg-white overflow-hidden relative">
-      
-      {/* Left Marketing & Info Panel (Desktop Only) */}
-      <aside className="hidden md:flex md:w-[38%] lg:w-[34%] xl:w-[30%] shrink-0 flex-col bg-slate-50/50 border-r border-slate-100 text-slate-900 p-8 lg:p-10 justify-between overflow-y-auto no-scrollbar relative z-30">
-        <div className="space-y-12">
-          {/* Logo & Sign In */}
-          <div className="flex items-center justify-between">
-            <button onClick={goHome} className="flex items-center space-x-2 cursor-pointer bg-transparent border-none p-0 text-left">
-              <h1 className="text-2xl font-black tracking-tighter text-brand-700 leading-none">TERRAZAS</h1>
-              <span className="bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider">
-                Network
-              </span>
-            </button>
-            <button 
-              onClick={() => openAuth('customer', 'signin')} 
-              className="text-xs font-bold text-slate-600 hover:text-slate-900 px-3 py-1.5 border border-slate-200 hover:border-slate-300 rounded-xl transition-all cursor-pointer bg-white shadow-sm"
-            >
-              Sign In
-            </button>
-          </div>
-
-          {/* Hero Pitch */}
-          <div className="space-y-4">
-            <h2 className="text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">
-              Lawn Care, <br />
-              <span className="text-brand-600">
-                Dispatched Instantly.
-              </span>
-            </h2>
-            <p className="text-slate-500 text-sm font-medium leading-relaxed">
-              Book top-rated, licensed, and insured lawn pros in your neighborhood. Secure escrow payment means your money is safe until you approve the job photo.
-            </p>
-          </div>
-
-          {/* Pillars */}
-          <div className="space-y-6">
-            <div className="flex items-start space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
-                <Zap className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Instant Dispatch</h4>
-                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
-                  No haggling or waiting for quotes. Flat-rate booking matches you with active local pros in seconds.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Escrow Protection</h4>
-                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
-                  Funds held securely in escrow. Released only after you review and approve the provider's completion photos.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
-                <MapPin className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Live Route Tracking</h4>
-                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
-                  Watch your provider head to your house in real-time on the map with active SMS and Web Push alerts.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-xs font-black text-slate-800 tracking-wider uppercase">Licensed & Insured</h4>
-                <p className="text-slate-500 text-xs mt-0.5 leading-relaxed">
-                  Every partner pro is background-screened, certified, and fully backed by commercial general liability insurance.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Pro CTA card */}
-          <div className="bg-white border border-slate-100 rounded-3xl p-5 space-y-4 shadow-sm">
-            <div className="flex items-start space-x-3">
-              <span className="text-2xl shrink-0 mt-0.5">🚜</span>
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">Own a Lawn Care Business?</h4>
-                <p className="text-slate-500 text-[11px] font-medium leading-normal mt-0.5">
-                  List your rig, broadcast availability, and secure dispatch jobs in your zone.
-                </p>
-              </div>
-            </div>
-            <button 
-              onClick={() => openAuth('pro', 'signup')}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-3 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1.5 active:scale-[0.98]"
-            >
-              <span>Become a Partner Pro</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Footer info / stats */}
-        <div className="pt-6 mt-8 border-t border-slate-100 flex flex-wrap gap-x-6 gap-y-3 justify-between items-center text-slate-400 text-[11px] font-medium">
-          <div className="flex items-center space-x-2">
-            <TrendingUp className="w-4 h-4 text-brand-600 animate-pulse" />
-            <div>
-              <span className="text-slate-900 font-extrabold block text-xs">12,000+</span>
-              Yards Mowed
-            </div>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Star className="w-4 h-4 text-brand-600" />
-            <div>
-              <span className="text-slate-900 font-extrabold block text-xs">4.9 ★</span>
-              Avg. Rating
-            </div>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Users className="w-4 h-4 text-brand-600" />
-            <div>
-              <span className="text-slate-900 font-extrabold block text-xs">18 min</span>
-              Avg. Dispatch
-            </div>
-          </div>
-        </div>
-
-        <div className="pt-4 mt-6 border-t border-slate-100 flex justify-between items-center text-slate-400 text-[10px] font-medium">
-          <span>&copy; 2026 Terrazas. All rights reserved.</span>
-          <div className="flex gap-2">
-            <a href="/terms" className="hover:text-slate-600 underline">Terms</a>
-            <span>|</span>
-            <a href="/privacy" className="hover:text-slate-600 underline">Privacy</a>
-          </div>
-        </div>
-      </aside>
-
-      {/* Right Map & Interactive Console Column (Full screen on mobile, right side on desktop) */}
-      <div className="flex-1 h-full relative flex flex-col bg-white overflow-hidden">
-        {/* Live Google Maps Background */}
-        <div className="absolute inset-0 z-0 transition-all duration-1000 origin-center" style={{ transform: `scale(${mapScale})` }}>
-          <div className="absolute inset-0">
-            <div ref={mapContainerRef} className="w-full h-full" style={{ filter: 'saturate(0.85) brightness(1.05)' }} />
-            {/* Gradient overlay for readability */}
-            <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0.5) 70%, rgba(255,255,255,0.95) 100%)' }} />
-          </div>
-          {pinVisible && (
-            <div className="absolute top-[38%] left-1/2 -translate-x-1/2 -translate-y-1/2 transition-transform duration-500 z-10">
-              <div className="relative">
-                <div className="absolute -inset-6 bg-brand-500/20 rounded-full animate-ping" />
-                <div className="w-6 h-6 bg-brand-600 rounded-full border-4 border-white shadow-2xl" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Header - Mobile Only */}
-        <header className="relative z-30 px-6 py-5 glass border-b border-slate-100 flex items-center justify-between md:hidden">
-          <button onClick={goHome} className="cursor-pointer">
-            <h1 className="text-2xl font-black tracking-tighter text-brand-700 leading-none">TERRAZAS</h1>
-          </button>
-          <div className="flex items-center space-x-4">
-            {activeZip && (
-              <div className="flex flex-col text-right">
-                <span className="text-micro text-slate-400">Service Zone</span>
-                <span className="text-xs font-black text-slate-900">{activeZip}</span>
-              </div>
-            )}
-            <button onClick={() => openAuth('customer', 'choose')} className="flex items-center space-x-2 bg-slate-50 p-1.5 rounded-4xl border border-slate-100 hover:border-brand-300 transition-colors cursor-pointer">
-              <span className="text-xs font-bold px-2">Sign In</span>
-              <div className="w-8 h-8 rounded-xl bg-brand-600 flex items-center justify-center text-white text-xs font-bold">→</div>
-            </button>
-          </div>
-        </header>
-
-        {/* Desktop Top Header Overlay */}
-        <div className="hidden md:flex absolute top-6 right-6 z-30 items-center space-x-3 bg-white/95 backdrop-blur-md px-5 py-3 rounded-full border border-slate-100 shadow-lg pointer-events-auto">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-bold text-slate-800">
-            {activeZip ? `Zone ${activeZip} Dispatch` : 'Instant Dispatch Console'}
+    <div className="min-h-screen bg-white text-slate-900">
+      {/* ── Sticky Header ── */}
+      <header className="sticky top-0 z-40 glass border-b border-slate-100 px-5 md:px-10 py-4 flex items-center justify-between">
+        <div className="flex items-center space-x-2.5">
+          <h1 className="text-xl md:text-2xl font-black tracking-tighter text-brand-700 leading-none">TERRAZAS</h1>
+          <span className="hidden sm:inline bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider">
+            Lawn Care &amp; Tree Service
           </span>
-          {activeZip && (
-            <button onClick={goHome} className="text-micro font-bold text-slate-400 hover:text-slate-600 pl-2 border-l border-slate-200">
-              Reset
-            </button>
-          )}
         </div>
+        <div className="flex items-center space-x-2.5">
+          <a href={BUSINESS.phoneHref}
+            className="hidden md:flex items-center space-x-2 text-xs font-black text-slate-700 hover:text-brand-700 px-3 py-2 rounded-xl border border-slate-200 bg-white shadow-sm transition-colors">
+            <Phone className="w-3.5 h-3.5" />
+            <span>{BUSINESS.phone}</span>
+          </a>
+          <button onClick={() => openAuth('customer', 'signin')}
+            className="text-xs font-bold text-slate-600 hover:text-slate-900 px-4 py-2 border border-slate-200 hover:border-slate-300 rounded-xl transition-all cursor-pointer bg-white shadow-sm">
+            Sign In
+          </button>
+        </div>
+      </header>
 
-        {/* Drawer Console */}
-        <main className="relative z-20 flex-1 flex flex-col justify-end md:justify-start pointer-events-none">
-          <div className="drawer pointer-events-auto p-6 pb-10 transition-all duration-500 overflow-y-auto no-scrollbar">
-            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto -mt-3 mb-6 md:hidden" />
-
-            {/* ZIP ENTRY */}
-            {view === 'zip' && (
-              <div className="space-y-6 animate-fade-in">
-                <div className="space-y-2">
-                  <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Enter Area Code</h2>
-                  <p className="text-slate-500 font-bold text-sm">We'll check for active partners in your zone.</p>
-                </div>
-                <div className="relative group">
-                  <input type="text" maxLength={5} inputMode="numeric" placeholder="Zip Code" value={zip}
-                    onChange={(e) => setZip(e.target.value.replace(/\D/g, ''))}
-                    onKeyDown={(e) => e.key === 'Enter' && checkZip()}
-                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-4xl p-6 text-2xl font-black tracking-[0.2em] placeholder:text-slate-300 focus:bg-white focus:border-brand-500 focus:outline-none transition-all shadow-inner" />
-                  <button onClick={checkZip} disabled={zip.length < 5 || loading}
-                    className="absolute right-3 top-3 bottom-3 bg-brand-600 text-white px-8 rounded-4xl font-black text-xs shadow-xl shadow-brand-200 active:scale-95 transition-all disabled:bg-slate-300 disabled:shadow-none">
-                    {loading ? '...' : 'GO'}
-                  </button>
-                </div>
-                <input type="text" placeholder="Service Address (optional)" value={address} onChange={(e) => setAddress(e.target.value)} className="input-field text-sm" />
-                <a href="/yard-vision" className="w-full bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-5xl p-5 flex items-center justify-between group hover:border-brand-400 transition-all active:scale-95 block">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-14 h-14 bg-white rounded-4xl flex items-center justify-center text-3xl shadow-sm">📸</div>
-                    <div className="text-left">
-                      <div className="text-sm font-black text-slate-900 tracking-tight">Yard Vision AI</div>
-                      <div className="text-micro text-slate-500">Snap a photo for instant condition scan</div>
-                    </div>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-sm">→</div>
-                </a>
-
-                {/* Trust/Guarantee highlights */}
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  <div className="p-4 bg-brand-50/40 rounded-3xl border border-brand-100/40 text-left">
-                    <span className="text-lg mb-1 block">🛡️</span>
-                    <h4 className="text-[10px] font-black text-brand-900 uppercase tracking-wider">Escrow Secure</h4>
-                    <p className="text-[9px] text-brand-700 font-bold leading-normal mt-0.5">Funds held safely. Pay only when you approve completion photo.</p>
-                  </div>
-                  <div className="p-4 bg-brand-50/40 rounded-3xl border border-brand-100/40 text-left">
-                    <span className="text-lg mb-1 block">⚡</span>
-                    <h4 className="text-[10px] font-black text-brand-900 uppercase tracking-wider">Instant Match</h4>
-                    <p className="text-[9px] text-brand-700 font-bold leading-normal mt-0.5">No haggling or quotes. Dispatched instantly to your lawn.</p>
-                  </div>
-                </div>
-
-                {/* Mobile Supply CTA */}
-                <div className="text-center pt-2 md:hidden">
-                  <button 
-                    onClick={() => openAuth('pro', 'signup')}
-                    className="text-micro text-slate-400 hover:text-brand-600 font-bold transition-colors inline-flex items-center space-x-1"
-                  >
-                    <span>Own a lawn care business? Partner with us</span>
-                    <span className="text-xs">→</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* PROVIDER CHOICE */}
-            {view === 'provider-choice' && (
-              <div className="space-y-6 animate-fade-in">
-                <div className="space-y-1">
-                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Active in <span className="text-brand-600">{activeZip}</span></h2>
-                  <p className="text-label">How would you like to book?</p>
-                </div>
-                {scanScore !== null && (
-                  <div className="flex items-center justify-between p-4 bg-brand-50/80 rounded-3xl border border-brand-100/60 animate-fade-in">
-                    <div className="flex items-center space-x-3">
-                      <span className="text-2xl">🔬</span>
-                      <div className="text-left">
-                        <div className="text-xs font-black text-brand-800 tracking-tight">AI Scan Applied</div>
-                        <div className="text-[10px] font-bold text-brand-600">Condition Score: {scanScore}/10</div>
-                      </div>
-                    </div>
-                    <button onClick={() => { setScanScore(null); localStorage.removeItem('terrazas_scan_score'); }}
-                      className="text-brand-400 hover:text-brand-700 font-black text-micro bg-transparent border-none cursor-pointer px-2 py-1">
-                      Clear
-                    </button>
-                  </div>
-                )}
-                <div className="space-y-3">
-                  <button onClick={() => setView('preferred')} className="w-full p-5 bg-white border-2 border-slate-100 rounded-4xl flex items-center space-x-4 text-left hover:border-brand-500 transition-all">
-                    <div className="w-14 h-14 bg-brand-50 rounded-4xl flex items-center justify-center text-3xl">⭐</div>
-                    <div className="flex-1">
-                      <div className="font-black text-slate-800">Select Preferred</div>
-                      <div className="text-micro text-slate-400">Pick a specific business</div>
-                    </div>
-                  </button>
-                  <button onClick={() => setView('tiers')} className="w-full p-5 bg-brand-600 text-white rounded-4xl flex items-center space-x-4 shadow-xl shadow-brand-100 active:scale-95 transition-all text-left">
-                    <div className="w-14 h-14 bg-white/20 rounded-4xl flex items-center justify-center text-3xl relative">📡<div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-brand-600 animate-pulse" /></div>
-                    <div className="flex-1">
-                      <div className="font-black">Broadcast Job</div>
-                      <div className="text-micro opacity-80">Instant Dispatch • {providerCount > 0 ? `${providerCount} Pros Active` : 'Network Search'}</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* PREFERRED PROVIDERS */}
-            {view === 'preferred' && (
-              <div className="space-y-5 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <button onClick={() => setView('provider-choice')} className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center font-bold">←</button>
-                    <h2 className="text-xl font-black text-slate-900 tracking-tight">Preferred Pros</h2>
-                  </div>
-                  <span className="badge badge-verified">Verified</span>
-                </div>
-                <div className="space-y-2 overflow-y-auto max-h-[40vh] no-scrollbar">
-                  {providers.length > 0 ? providers.map((pro) => (
-                    <button key={pro.id} onClick={() => selectSpecificPro(pro)} disabled={!pro.isActive}
-                      className={`provider-card w-full text-left ${!pro.isActive ? 'provider-card-offline' : ''}`}>
-                      <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-xl font-bold text-brand-600">
-                        {pro.businessName.split(' ').map((w) => w[0]).join('').slice(0, 2)}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-black text-slate-800">{pro.businessName}</div>
-                        <div className="text-micro text-brand-600">{pro.rating ? `${pro.rating} ★ (${pro.reviewCount})` : 'New'} • {pro.isActive ? 'Active' : 'Offline'}</div>
-                      </div>
-                      {!pro.isActive && <span className="badge badge-offline">Offline</span>}
-                    </button>
-                  )) : (
-                    <div className="p-6 text-center text-slate-400"><p className="text-4xl mb-3">🔍</p><p className="font-bold text-sm">No preferred providers in {activeZip} yet.</p></div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* SERVICE TIERS */}
-            {view === 'tiers' && (
-              <div className="space-y-5 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <button onClick={() => setView('provider-choice')} className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center font-bold">←</button>
-                    <h2 className="text-xl font-black text-slate-900 tracking-tight">Service Tier</h2>
-                  </div>
-                  <span className="badge badge-verified">Licensed</span>
-                </div>
-                <div className="space-y-2 overflow-y-auto max-h-[35vh] no-scrollbar">
-                  {(Object.keys(TIERS) as Array<'basic' | 'premium'>).map((key) => {
-                    const tier = TIERS[key];
-                    const isSelected = selectedTier === key;
-                    return (
-                      <button key={key} onClick={() => setSelectedTier(key)}
-                        className={`tier-card w-full text-left ${isSelected ? 'tier-card-selected' : 'tier-card-unselected'}`}>
-                        <div className="flex items-center space-x-4">
-                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${isSelected ? 'bg-brand-600 text-white' : 'bg-slate-50'}`}>{tier.emoji}</div>
-                          <div>
-                            <div className={`font-black ${isSelected ? 'text-brand-900' : 'text-slate-800'}`}>{tier.name}</div>
-                            <div className={`text-[9px] font-bold uppercase tracking-widest ${isSelected ? 'text-brand-600' : 'text-slate-400'}`}>{tier.description}</div>
-                            {isSelected && <div className="mt-2 flex flex-wrap gap-1">{tier.includes.map((item) => <span key={item} className="text-[8px] bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full font-bold">{item}</span>)}</div>}
-                          </div>
-                        </div>
-                        <div className={`font-black text-lg ${isSelected ? 'text-brand-900' : 'text-slate-800'}`}>${tier.basePrice}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-                <button onClick={confirmBroadcast} disabled={loading} className="btn-primary">{loading ? 'DISPATCHING...' : 'ORDER NOW ⚡️'}</button>
-              </div>
-            )}
-
-            {/* BROADCASTING */}
-            {view === 'searching' && (
-              <div className="space-y-8 animate-fade-in text-center">
-                <div className="relative w-32 h-32 mx-auto">
-                  <div className="absolute inset-0 rounded-full border-4 border-brand-500/20 border-t-brand-500 animate-spin" />
-                  <div className="absolute inset-4 rounded-full bg-brand-500/10 flex items-center justify-center text-4xl">📡</div>
-                </div>
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Broadcasting Order</h2>
-                  <p className="text-sm text-slate-500 font-bold px-6">Notifying pros within 20 miles of <span className="font-black text-brand-600">{activeZip}</span>.</p>
-                </div>
-                <div className="bg-slate-50/50 rounded-4xl p-6 border border-slate-100">
-                  <div className="text-label mb-1">Claim Window</div>
-                  <div className="text-4xl font-black text-brand-600 tabular-nums tracking-tighter">{countdown > 0 ? formatTime(countdown) : 'Expanding Search...'}</div>
-                </div>
-                <div className="text-[11px] text-slate-400 font-bold italic">"Pros typically claim within 3 minutes."</div>
-                <button onClick={goHome} className="text-slate-400 font-black text-micro hover:text-slate-600 transition-colors">Cancel & Return</button>
-              </div>
-            )}
-
-            {/* SUCCESS */}
-            {view === 'success' && (
-              <div className="space-y-8 animate-scale-in text-center">
-                <div className="relative w-32 h-32 mx-auto">
-                  <div className="absolute inset-0 bg-brand-500/20 rounded-full animate-ping" />
-                  <div className="relative w-full h-full bg-brand-600 rounded-full flex items-center justify-center text-5xl text-white shadow-xl">🚜</div>
-                </div>
-                <div className="space-y-1">
-                  <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Job Dispatched!</h3>
-                  <p className="text-slate-500 font-medium px-8 leading-relaxed">
-                    We've alerted <span className="font-black text-brand-600">{providerCount > 0 ? `${providerCount} Pros` : 'our network'}</span> near <span className="font-black">{activeZip}</span>.
-                  </p>
-                </div>
-                <div className="p-5 bg-slate-50 rounded-4xl border border-slate-100 flex items-center justify-center space-x-3">
-                  <div className="w-2 h-2 bg-brand-500 rounded-full animate-pulse" />
-                  <span className="text-label">Searching for first claim...</span>
-                </div>
-                <button onClick={goHome} className="text-slate-400 font-black text-micro">Cancel Request</button>
-              </div>
-            )}
+      <main className="max-w-5xl mx-auto px-5 md:px-10 pb-28 md:pb-16">
+        {/* ── Hero ── */}
+        <section className="pt-12 md:pt-20 pb-10 text-center md:text-left md:flex md:items-center md:space-x-12">
+          <div className="md:flex-1 space-y-5">
+            <div className="inline-flex items-center space-x-2 bg-brand-50 border border-brand-100 rounded-full px-4 py-1.5">
+              <MapPin className="w-3.5 h-3.5 text-brand-600" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-brand-700">Serving Southwest Kansas &amp; the Panhandles</span>
+            </div>
+            <h2 className="text-4xl md:text-5xl font-black tracking-tighter leading-[1.05]">
+              Lawn &amp; tree work,<br />
+              <span className="text-brand-600">booked in a minute.</span>
+            </h2>
+            <p className="text-slate-500 text-sm md:text-base font-medium leading-relaxed max-w-md mx-auto md:mx-0">
+              {BUSINESS.name} — family-owned and operated for {BUSINESS.yearsInBusiness} years out of {BUSINESS.city}.
+              Schedule a mow at a flat price, or send us photos and get a free quote for bigger jobs.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center md:justify-start pt-1">
+              <button onClick={() => bookService('mowing')}
+                className="bg-brand-600 hover:bg-brand-700 text-white font-black text-sm px-7 py-4 rounded-4xl shadow-xl shadow-brand-200 active:scale-95 transition-all flex items-center justify-center space-x-2">
+                <span>Book Lawn Mowing</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              <a href="/post"
+                className="bg-slate-900 hover:bg-slate-800 text-white font-black text-sm px-7 py-4 rounded-4xl active:scale-95 transition-all flex items-center justify-center space-x-2">
+                <span>Get a Free Quote</span>
+              </a>
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-2 justify-center md:justify-start pt-3 text-[11px] font-bold text-slate-500">
+              <span className="flex items-center space-x-1.5"><ShieldCheck className="w-4 h-4 text-brand-600" /><span>Licensed &amp; Insured</span></span>
+              <span className="flex items-center space-x-1.5"><Star className="w-4 h-4 text-brand-600" /><span>Family-Owned {BUSINESS.yearsInBusiness} Years</span></span>
+              <span className="flex items-center space-x-1.5"><Camera className="w-4 h-4 text-brand-600" /><span>Before &amp; After Photos</span></span>
+            </div>
           </div>
-        </main>
 
-        {/* Bottom Nav */}
-        <nav className="relative z-30 p-4 pb-10 bg-white border-t border-slate-50 flex justify-around items-center shrink-0 safe-bottom">
-          <button onClick={goHome} className="w-14 h-14 flex items-center justify-center rounded-4xl bg-brand-50 text-brand-600">🏠</button>
-          <a href="/dashboard?tab=jobs" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">🗓️</a>
-          <a href="/dashboard?tab=profile" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors">👤</a>
-        </nav>
-      </div>
+          {/* Zip checker card */}
+          <div className="hidden md:block md:w-[340px] shrink-0">
+            <ZipCard zip={zip} setZip={setZip} zipResult={zipResult} checkZip={checkZip} bookService={bookService} />
+          </div>
+        </section>
 
-      {/* Loader */}
-      {loading && (
-        <div className="absolute inset-0 bg-white/95 backdrop-blur-2xl z-[100] flex items-center justify-center flex-col space-y-4 animate-fade-in">
-          <div className="w-14 h-14 border-4 border-brand-600 border-t-transparent rounded-full animate-spin" />
-          <div className="text-micro text-brand-900 tracking-[0.4em]">Connecting</div>
+        {/* Zip checker (mobile) */}
+        <section className="md:hidden mb-10">
+          <ZipCard zip={zip} setZip={setZip} zipResult={zipResult} checkZip={checkZip} bookService={bookService} />
+        </section>
+
+        {/* ── Services ── */}
+        <section className="py-10 border-t border-slate-100">
+          <div className="mb-6">
+            <h3 className="text-2xl font-black tracking-tight">What do you need done?</h3>
+            <p className="text-slate-500 text-sm font-medium mt-1">Flat-rate mowing books instantly. Everything else gets a free quote — usually same day.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {SERVICES.map((s) => (
+              <button key={s.id} onClick={() => bookService(s.id)}
+                className="p-5 bg-white border-2 border-slate-100 rounded-4xl text-left hover:border-brand-500 active:scale-[0.98] transition-all group">
+                <div className="flex items-start justify-between">
+                  <div className="w-12 h-12 bg-brand-50 rounded-3xl flex items-center justify-center text-2xl mb-3">{s.emoji}</div>
+                  <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${s.mode === 'book' ? 'bg-brand-100 text-brand-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {s.mode === 'book' ? 'Instant Price' : 'Free Quote'}
+                  </span>
+                </div>
+                <div className="font-black text-slate-900 text-sm tracking-tight">{s.name}</div>
+                <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-1">{s.blurb}</p>
+                <div className="text-[10px] font-black text-brand-600 mt-3 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span>{s.mode === 'book' ? 'Book now' : 'Request quote'}</span>
+                  <ArrowRight className="w-3 h-3" />
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* ── How it works ── */}
+        <section className="py-10 border-t border-slate-100">
+          <h3 className="text-2xl font-black tracking-tight mb-6">How it works</h3>
+          <div className="grid md:grid-cols-3 gap-4">
+            {[
+              { icon: <ClipboardList className="w-5 h-5" />, title: '1. Tell us about the job', body: 'Pick a service, drop your address, add photos and a preferred day. Takes about a minute.' },
+              { icon: <CalendarCheck className="w-5 h-5" />, title: '2. We confirm or quote', body: 'Mowing is a flat rate, confirmed right away. Tree and landscape work gets a free quote you approve first.' },
+              { icon: <Truck className="w-5 h-5" />, title: '3. We show up & prove it', body: 'Track the crew on service day and get completion photos when the work is done. Pay after the job.' },
+            ].map((step) => (
+              <div key={step.title} className="p-6 bg-slate-50/60 rounded-4xl border border-slate-100">
+                <div className="w-10 h-10 rounded-xl bg-white border border-brand-100 flex items-center justify-center text-brand-600 mb-4 shadow-sm">{step.icon}</div>
+                <h4 className="text-sm font-black tracking-tight">{step.title}</h4>
+                <p className="text-xs text-slate-500 font-medium leading-relaxed mt-1.5">{step.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Yard Vision ── */}
+        <section className="py-6">
+          <a href="/yard-vision"
+            className="w-full bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-5xl p-6 flex items-center justify-between hover:border-brand-400 transition-all active:scale-[0.99] block">
+            <div className="flex items-center space-x-4">
+              <div className="w-14 h-14 bg-white rounded-4xl flex items-center justify-center text-3xl shadow-sm">📸</div>
+              <div className="text-left">
+                <div className="text-sm font-black text-slate-900 tracking-tight">Yard Vision AI</div>
+                <div className="text-micro text-slate-500">Snap a photo of your yard for an instant condition scan</div>
+              </div>
+            </div>
+            <div className="w-9 h-9 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-sm shrink-0">→</div>
+          </a>
+        </section>
+
+        {/* ── Service area ── */}
+        <section className="py-10 border-t border-slate-100">
+          <h3 className="text-2xl font-black tracking-tight mb-2">Where we work</h3>
+          <p className="text-slate-500 text-sm font-medium mb-5">Based in {BUSINESS.city} — serving communities across three states.</p>
+          <div className="flex flex-wrap gap-2">
+            {SERVICE_AREAS.map((a) => (
+              <span key={`${a.town}-${a.state}`} className="px-4 py-2 bg-white border border-slate-200 rounded-full text-xs font-bold text-slate-700">
+                {a.town}, {a.state}
+              </span>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 font-medium mt-4">
+            Don&apos;t see your town? Call <a href={BUSINESS.phoneHref} className="font-black text-brand-600">{BUSINESS.phone}</a> — if we can drive to it, we can probably mow it.
+          </p>
+        </section>
+      </main>
+
+      {/* ── Footer ── */}
+      <footer className="border-t border-slate-100 bg-slate-50/50 px-5 md:px-10 py-10 pb-32 md:pb-10">
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row md:items-start md:justify-between gap-8">
+          <div className="space-y-2">
+            <h1 className="text-xl font-black tracking-tighter text-brand-700">TERRAZAS</h1>
+            <p className="text-xs text-slate-500 font-medium max-w-xs leading-relaxed">{BUSINESS.tagline}.</p>
+          </div>
+          <div className="space-y-1.5 text-xs font-bold text-slate-600">
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Contact</div>
+            <a href={BUSINESS.phoneHref} className="block hover:text-brand-700">{BUSINESS.phone}</a>
+            <a href={`mailto:${BUSINESS.email}`} className="block hover:text-brand-700">{BUSINESS.email}</a>
+            <span className="block text-slate-400">{BUSINESS.city}</span>
+          </div>
+          <div className="space-y-1.5 text-xs font-bold text-slate-600">
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Site</div>
+            <a href="/dashboard" className="block hover:text-brand-700">My Jobs</a>
+            <a href="/terms" className="block hover:text-brand-700">Terms of Service</a>
+            <a href="/privacy" className="block hover:text-brand-700">Privacy Policy</a>
+          </div>
         </div>
-      )}
+        <div className="max-w-5xl mx-auto mt-8 pt-6 border-t border-slate-100 text-[10px] text-slate-400 font-medium">
+          &copy; 2026 {BUSINESS.name}. All rights reserved.
+        </div>
+      </footer>
 
-      {/* Auth Modal */}
-      <AuthModal 
-        isOpen={authModalConfig.isOpen} 
-        onClose={() => setAuthModalConfig({ ...authModalConfig, isOpen: false })} 
+      {/* ── Mobile bottom nav ── */}
+      <nav className="fixed bottom-0 inset-x-0 z-40 md:hidden p-4 pb-8 bg-white/95 backdrop-blur-md border-t border-slate-100 flex justify-around items-center safe-bottom">
+        <span className="w-14 h-14 flex items-center justify-center rounded-4xl bg-brand-50 text-brand-600 text-xl">🏠</span>
+        <a href="/dashboard?tab=jobs" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors text-xl">🗓️</a>
+        <a href={BUSINESS.phoneHref} className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors text-xl">📞</a>
+        <a href="/dashboard?tab=profile" className="w-14 h-14 flex items-center justify-center rounded-4xl text-slate-300 hover:text-brand-500 transition-colors text-xl">👤</a>
+      </nav>
+
+      <AuthModal
+        isOpen={authModalConfig.isOpen}
+        onClose={() => setAuthModalConfig({ ...authModalConfig, isOpen: false })}
         initialRole={authModalConfig.initialRole}
         initialView={authModalConfig.initialView}
       />
+    </div>
+  );
+}
+
+// ── Zip availability checker ─────────────────────────────────────────
+function ZipCard({ zip, setZip, zipResult, checkZip, bookService }: {
+  zip: string;
+  setZip: (z: string) => void;
+  zipResult: 'served' | 'unserved' | null;
+  checkZip: () => void;
+  bookService: (id: string) => void;
+}) {
+  return (
+    <div className="bg-white border-2 border-slate-100 rounded-5xl p-6 shadow-xl shadow-slate-100 space-y-4">
+      <div>
+        <h3 className="text-lg font-black tracking-tight">Do we serve your area?</h3>
+        <p className="text-[11px] text-slate-500 font-bold mt-0.5">Enter your zip code to check.</p>
+      </div>
+      <div className="relative">
+        <input type="text" maxLength={5} inputMode="numeric" placeholder="Zip Code" value={zip}
+          onChange={(e) => setZip(e.target.value.replace(/\D/g, ''))}
+          onKeyDown={(e) => e.key === 'Enter' && checkZip()}
+          className="w-full bg-slate-50 border-2 border-slate-100 rounded-4xl p-5 text-xl font-black tracking-[0.2em] placeholder:text-slate-300 focus:bg-white focus:border-brand-500 focus:outline-none transition-all shadow-inner" />
+        <button onClick={checkZip} disabled={zip.length < 5}
+          className="absolute right-2.5 top-2.5 bottom-2.5 bg-brand-600 text-white px-6 rounded-4xl font-black text-xs shadow-lg shadow-brand-200 active:scale-95 transition-all disabled:bg-slate-300 disabled:shadow-none">
+          GO
+        </button>
+      </div>
+      {zipResult === 'served' && (
+        <div className="p-4 bg-brand-50 border border-brand-100 rounded-3xl space-y-3 animate-fade-in">
+          <div className="text-xs font-black text-brand-800">✅ You&apos;re in our service area!</div>
+          <div className="flex gap-2">
+            <button onClick={() => bookService('mowing')}
+              className="flex-1 bg-brand-600 text-white text-[11px] font-black py-3 rounded-2xl active:scale-95 transition-all">
+              Book a Mow
+            </button>
+            <button onClick={() => bookService('tree_removal')}
+              className="flex-1 bg-slate-900 text-white text-[11px] font-black py-3 rounded-2xl active:scale-95 transition-all">
+              Get a Quote
+            </button>
+          </div>
+        </div>
+      )}
+      {zipResult === 'unserved' && (
+        <div className="p-4 bg-amber-50 border border-amber-100 rounded-3xl animate-fade-in">
+          <div className="text-xs font-black text-amber-800">We&apos;re not in {zip} regularly yet.</div>
+          <p className="text-[11px] text-amber-700 font-bold mt-1">
+            Give us a call at <a href={BUSINESS.phoneHref} className="underline">{BUSINESS.phone}</a> — for bigger jobs we&apos;ll travel.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

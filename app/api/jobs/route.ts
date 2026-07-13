@@ -2,15 +2,15 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { geocodeAddress } from '@/lib/google-maps';
 import { calculateDynamicPrice } from '@/lib/pricing';
-import { broadcastJobToProviders } from '@/lib/notifications';
 import { maskJobsForViewer } from '@/lib/context-envelope';
-import { runEscalationCheck } from '@/lib/escalation';
 import { requireAuth } from '@/lib/api-auth';
+import { getService, isZipServed, BUSINESS } from '@/lib/business';
+import { getBusinessProvider } from '@/lib/business-server';
+import { sendNewRequestEmail } from '@/lib/email';
 
-// GET /api/jobs — list jobs (broadcast for pros, own for customers)
+// GET /api/jobs — list jobs (own jobs for customers, assigned requests for the business)
 export async function GET(request: Request) {
-  // C1 FIX: Require authentication
-  const { user, dbUser, error: authError } = await requireAuth();
+  const { dbUser, error: authError } = await requireAuth();
   if (authError) return authError;
 
   const { searchParams } = new URL(request.url);
@@ -18,11 +18,14 @@ export async function GET(request: Request) {
   const zip = searchParams.get('zip');
 
   try {
-    // ── Inline auto-approve: resolve expired 10-min veto deadlines ──
+    // ── Auto-approve expired price-adjustment approvals ──
+    // Only jobs that were given an approvalDeadline (legacy marketplace claims).
+    // Quote requests never get a deadline — a quote must be explicitly accepted.
     const expired = await db.job.findMany({
       where: {
         status: 'pending_approval',
         approvalDeadline: { lte: new Date() },
+        requestType: { not: 'quote' },
       },
     });
     if (expired.length > 0) {
@@ -32,53 +35,9 @@ export async function GET(request: Request) {
       });
     }
 
-    // ── Master Parachute: T+60 unclaimed job escalation ──
-    const sixtyMinsAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const staleJobs = await db.job.findMany({
-      where: {
-        status: 'broadcast',
-        broadcastedAt: { lte: sixtyMinsAgo },
-        surgeLevel: { not: 'parachute' }, // Don't re-trigger
-      },
-    });
-    if (staleJobs.length > 0) {
-      for (const staleJob of staleJobs) {
-        // Boost provider payout by 5%
-        const boostedPayout = Math.round(staleJob.providerPayout * 1.05 * 100) / 100;
-        await db.job.update({
-          where: { id: staleJob.id },
-          data: {
-            providerPayout: boostedPayout,
-            surgeLevel: 'parachute',
-          },
-        });
-
-        // Create admin notification
-        await db.notification.create({
-          data: {
-            userId: staleJob.customerId, // Will also be visible in admin panel
-            jobId: staleJob.id,
-            type: 'system',
-            channel: 'in_app',
-            title: '⚠️ Job unclaimed for 60+ minutes',
-            body: `Job in ${staleJob.zipCode} ($${staleJob.price}) has no provider. Payout boosted to $${boostedPayout}. Consider manual dispatch.`,
-            isSent: true,
-            sentAt: new Date(),
-          },
-        });
-      }
-      console.log(`[Parachute] Boosted ${staleJobs.length} stale jobs`);
-    }
-
-    // ── System 2: Time Dilation Escalation ──
-    // Promote broadcast jobs up the visibility ladder based on effective age
-    runEscalationCheck().catch((err) => {
-      console.error('[Escalation] Check error:', err);
-    });
-
     const where: any = {};
 
-    // M1 FIX: Scope queries to the authenticated user's own data
+    // Scope queries to the authenticated user's own data
     const viewerRole = dbUser?.role || 'customer';
     const viewerId = dbUser?.id;
 
@@ -91,11 +50,13 @@ export async function GET(request: Request) {
     if (status) {
       const statuses = status.split(',').map(s => s.trim());
       if (viewerRole === 'pro' && provider && statuses.includes('broadcast')) {
+        // "broadcast" from the pro dashboard means: new requests waiting on the
+        // business to accept or quote (single-business mode assigns them directly).
         const otherStatuses = statuses.filter(s => s !== 'broadcast');
         where.OR = [
           { status: 'broadcast' },
           { status: 'pending_claim', providerId: provider.id },
-          ...(otherStatuses.length > 0 ? [{ status: { in: otherStatuses } }] : [])
+          ...(otherStatuses.length > 0 ? [{ status: { in: otherStatuses }, providerId: provider.id }] : [])
         ];
       } else {
         where.status = statuses.length === 1 ? statuses[0] : { in: statuses };
@@ -104,13 +65,13 @@ export async function GET(request: Request) {
     if (zip) where.zipCode = zip;
 
     if (viewerRole === 'customer') {
-      // Customers only see their own jobs + broadcast jobs
-      where.OR = [
-        { customerId: viewerId },
-        { status: 'broadcast' },
-      ];
+      // Customers only ever see their own jobs
+      where.customerId = viewerId;
+    } else if (viewerRole === 'pro' && provider && !where.OR) {
+      // Pros see jobs assigned to them
+      where.providerId = provider.id;
     }
-    // Pros and admins can see all matching jobs (filtered by status/zip)
+    // Admins can see all matching jobs (filtered by status/zip)
 
     const jobs = await db.job.findMany({
       where,
@@ -122,9 +83,10 @@ export async function GET(request: Request) {
       take: 50,
     });
 
-    // ── System 3: Apply Sovereign Context Envelope ──
-    // Mask sensitive data based on who's viewing
-    const maskedJobs = maskJobsForViewer(jobs, viewerId || null, viewerRole);
+    // Mask sensitive data based on who's viewing.
+    // Pros are identified by their Provider id (job.providerId is a Provider id, not a User id).
+    const viewerKey = viewerRole === 'pro' && provider ? provider.id : viewerId;
+    const maskedJobs = maskJobsForViewer(jobs, viewerKey || null, viewerRole);
 
     return NextResponse.json({ jobs: maskedJobs });
   } catch (error: any) {
@@ -132,9 +94,8 @@ export async function GET(request: Request) {
   }
 }
 
-// POST /api/jobs — create a new job with dynamic pricing
+// POST /api/jobs — create a booking or quote request, assigned to the business
 export async function POST(request: Request) {
-  // C1 FIX: Require authentication
   const { dbUser, error: authError } = await requireAuth();
   if (authError) return authError;
 
@@ -142,8 +103,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     let {
       zipCode, address, latitude, longitude, placeId,
-      serviceType, tier, providerId, customerNotes,
-      // Dynamic pricing inputs
+      serviceType, requestType, preferredDate, timeWindow,
+      tier, customerNotes,
+      // Dynamic pricing inputs (fixed-price bookings only)
       scope, lotSize, urgency, conditionScore, extras,
       // Photos
       photoFrontUrl, photoBackUrl, photoExtraUrl,
@@ -153,7 +115,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'zipCode is required' }, { status: 400 });
     }
 
-    // M1 FIX: Use the authenticated user's ID — no arbitrary customerId from body
+    const service = getService(serviceType || 'mowing');
+    if (!service) {
+      return NextResponse.json({ error: `Unknown service: ${serviceType}` }, { status: 400 });
+    }
+    // Quote-only services always go through the quote flow
+    const isQuote = requestType === 'quote' || service.mode === 'quote';
+
+    if (!isZipServed(zipCode)) {
+      return NextResponse.json({
+        error: 'OUTSIDE_SERVICE_AREA',
+        message: `We don't currently serve ${zipCode}. Call ${BUSINESS.phone} — we may still be able to help.`,
+      }, { status: 400 });
+    }
+
+    // Route every request to the business's provider record
+    const businessProvider = await getBusinessProvider();
+    if (!businessProvider) {
+      return NextResponse.json({
+        error: 'NO_PROVIDER',
+        message: `Online booking is temporarily unavailable. Please call ${BUSINESS.phone}.`,
+      }, { status: 503 });
+    }
+
+    // Use the authenticated user's ID — no arbitrary customerId from body
     const customerId = dbUser!.id;
 
     // Auto-geocode address
@@ -167,14 +152,13 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── Duplicate Broadcast Guard (Idempotency) ──
+    // ── Duplicate Request Guard (Idempotency) ──
     const targetAddress = address || `Service in ${zipCode}`;
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
     const existingJob = await db.job.findFirst({
       where: {
         customerId,
-        serviceType: serviceType || 'mowing',
-        tier: tier || 'basic',
+        serviceType: service.id,
         address: targetAddress,
         createdAt: { gte: twoMinutesAgo },
         status: {
@@ -186,16 +170,18 @@ export async function POST(request: Request) {
     if (existingJob) {
       return NextResponse.json(
         {
-          error: 'DUPLICATE_BROADCAST',
-          message: 'You have already posted an identical job request in the last 2 minutes. Please check your active jobs.',
+          error: 'DUPLICATE_REQUEST',
+          message: 'You already submitted an identical request in the last 2 minutes. Please check your active jobs.',
           jobId: existingJob.id,
         },
         { status: 409 }
       );
     }
 
-    // ── Dynamic Pricing ──
-    const pricing = await calculateDynamicPrice({
+    // ── Pricing ──
+    // Fixed-price bookings get the dynamic price; quote requests start at $0
+    // until the business responds with a price.
+    const pricing = isQuote ? null : await calculateDynamicPrice({
       tier: tier || 'basic',
       scope: scope || 'front_back',
       conditionScore: conditionScore || undefined,
@@ -210,11 +196,14 @@ export async function POST(request: Request) {
       data: {
         customerId,
         zipCode,
-        address: address || `Service in ${zipCode}`,
+        address: targetAddress,
         latitude: latitude || null,
         longitude: longitude || null,
         placeId: placeId || null,
-        serviceType: serviceType || 'mowing',
+        serviceType: service.id,
+        requestType: isQuote ? 'quote' : 'book',
+        preferredDate: preferredDate ? new Date(preferredDate) : null,
+        timeWindow: timeWindow || null,
         tier: tier || 'basic',
 
         // Pricing variables
@@ -222,24 +211,24 @@ export async function POST(request: Request) {
         lotSize: lotSize || 'medium',
         urgency: urgency || 'same_day',
         conditionScore: conditionScore || null,
-        conditionGrade: pricing.conditionGrade,
+        conditionGrade: pricing?.conditionGrade ?? null,
         extras: JSON.stringify(extras || []),
 
         // Stored multipliers (for transparency/audit)
-        basePrice: pricing.basePrice,
-        scopeMultiplier: pricing.scopeMultiplier,
-        conditionMult: pricing.conditionMultiplier,
-        demandMultiplier: pricing.demandMultiplier,
-        lotSizeMultiplier: pricing.lotSizeMultiplier,
-        urgencyMultiplier: pricing.urgencyMultiplier,
+        basePrice: pricing?.basePrice ?? 0,
+        scopeMultiplier: pricing?.scopeMultiplier ?? 1,
+        conditionMult: pricing?.conditionMultiplier ?? 1,
+        demandMultiplier: pricing?.demandMultiplier ?? 1,
+        lotSizeMultiplier: pricing?.lotSizeMultiplier ?? 1,
+        urgencyMultiplier: pricing?.urgencyMultiplier ?? 1,
 
         // Final amounts — no priceOverride from client
-        price: pricing.jobPrice,
-        serviceFee: pricing.serviceFee,
-        processingFee: pricing.processingFee,
-        extrasTotal: pricing.extrasTotal,
-        customerTotal: pricing.customerTotal,
-        providerPayout: pricing.providerPayout,
+        price: pricing?.jobPrice ?? 0,
+        serviceFee: pricing?.serviceFee ?? 0,
+        processingFee: pricing?.processingFee ?? 0,
+        extrasTotal: pricing?.extrasTotal ?? 0,
+        customerTotal: pricing?.customerTotal ?? 0,
+        providerPayout: pricing?.providerPayout ?? 0,
 
         // Photos
         photoFrontUrl: photoFrontUrl || null,
@@ -247,24 +236,48 @@ export async function POST(request: Request) {
         photoExtraUrl: photoExtraUrl || null,
 
         // Meta
-        surgeLevel: pricing.surgeLevel,
+        surgeLevel: pricing?.surgeLevel ?? null,
         customerNotes: customerNotes || null,
-        providerId: providerId || null,
-        status: providerId ? 'pending_claim' : 'broadcast',
-        broadcastedAt: !providerId ? new Date() : null,
+
+        // Single-business mode: every request is a direct offer to the business
+        providerId: businessProvider.id,
+        pendingProId: businessProvider.id,
+        preferredProId: businessProvider.id,
+        broadcastTier: 0,
+        status: 'pending_claim',
       },
     });
 
-    // 🔔 Broadcast to eligible providers (non-blocking)
-    if (!providerId) {
-      broadcastJobToProviders(job.id).catch((err) => {
-        console.error('Broadcast error:', err);
+    // 🔔 Notify the business (non-blocking): in-app + email
+    (async () => {
+      await db.notification.create({
+        data: {
+          userId: businessProvider.userId,
+          jobId: job.id,
+          type: isQuote ? 'quote_request' : 'new_booking',
+          channel: 'in_app',
+          title: isQuote ? '📋 New quote request' : '🌱 New booking',
+          body: `${service.name} at ${targetAddress}${pricing ? ` — $${pricing.customerTotal.toFixed(2)}` : ''}`,
+          isSent: true,
+          sentAt: new Date(),
+        },
       });
-    }
+      const businessEmail = businessProvider.user?.email || BUSINESS.email;
+      if (businessEmail) {
+        await sendNewRequestEmail(businessEmail, {
+          requestType: isQuote ? 'quote' : 'book',
+          serviceName: service.name,
+          address: targetAddress,
+          preferredDate: preferredDate ? new Date(preferredDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : undefined,
+          customerName: dbUser!.name || undefined,
+          total: pricing ? pricing.customerTotal.toFixed(2) : undefined,
+        });
+      }
+    })().catch((err) => console.error('[Jobs] Business notification error:', err));
 
     return NextResponse.json({
       job,
-      pricing: {
+      pricing: pricing ? {
         basePrice: pricing.basePrice,
         jobPrice: pricing.jobPrice,
         serviceFee: pricing.serviceFee,
@@ -282,7 +295,7 @@ export async function POST(request: Request) {
         },
         surgeLevel: pricing.surgeLevel,
         priceWasCapped: pricing.priceWasCapped,
-      },
+      } : null,
     }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

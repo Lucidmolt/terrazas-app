@@ -28,10 +28,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'An array of jobIds is required' }, { status: 400 });
     }
 
-    // Fetch the jobs
+    // Fetch the jobs — scoped to this provider so pros can only optimize
+    // their own assigned jobs (prevents address disclosure via arbitrary IDs)
     const jobs = await db.job.findMany({
       where: {
         id: { in: jobIds },
+        providerId: provider.id,
       },
     });
 

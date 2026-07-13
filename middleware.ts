@@ -6,8 +6,10 @@ export async function middleware(request: NextRequest) {
   const res = NextResponse.next();
   const { pathname } = request.nextUrl;
 
-  // Public routes — no auth needed
-  const publicPaths = ['/', '/login', '/terms', '/onboarding', '/auth'];
+  // Public routes — no auth needed.
+  // /post is public so anyone can fill out a booking/quote; it prompts
+  // sign-in at submit time (the API still requires auth).
+  const publicPaths = ['/', '/login', '/terms', '/privacy', '/onboarding', '/auth', '/post', '/yard-vision', '/review'];
   if (publicPaths.some(p => pathname === p || pathname.startsWith(p + '/'))) return res;
 
   // API routes handle their own auth via requireAuth()/requireAdmin()/requireCronSecret()
@@ -27,14 +29,15 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   // Protected pages — redirect to login if no user
-  const protectedPages = ['/dashboard', '/pro', '/admin', '/post', '/account'];
+  const protectedPages = ['/dashboard', '/pro', '/admin'];
   if (!user && protectedPages.some(p => pathname.startsWith(p))) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Admin pages — enforce role server-side
+  // Admin pages — quick metadata gate for UX only. user_metadata is
+  // client-writable, so this must never be the real barrier: every admin
+  // API verifies the DB role via requireAdmin().
   if (pathname.startsWith('/admin') && user) {
-    // Check user role from metadata or DB
     const role = user.user_metadata?.role;
     if (role !== 'admin') {
       return NextResponse.redirect(new URL('/', request.url));

@@ -10,6 +10,7 @@
 // Without it, all functions return mock responses for testing.
 
 import { calculatePricing } from '@/lib/constants';
+import { APP_URL } from '@/lib/business';
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_CONFIGURED = !!STRIPE_SECRET_KEY;
@@ -161,8 +162,8 @@ export async function createProviderConnectAccount(
 
   const accountLink = await s.accountLinks.create({
     account: account.id,
-    refresh_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://terrazas.app'}/pro?stripe=refresh`,
-    return_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://terrazas.app'}/pro?stripe=complete`,
+    refresh_url: `${APP_URL}/pro?stripe=refresh`,
+    return_url: `${APP_URL}/pro?stripe=complete`,
     type: 'account_onboarding',
   });
 
