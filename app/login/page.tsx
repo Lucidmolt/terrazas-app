@@ -104,20 +104,24 @@ function LoginContent() {
     }
 
     if (data.session) {
-      // Sync user to Prisma database
+      // Sync user to Prisma database and route by the account's REAL role —
+      // the Customer/Pro toggle only matters for brand-new signups.
+      let accountRole: string = role;
       try {
-        await fetch('/api/auth/callback', {
+        const res = await fetch('/api/auth/callback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event: 'SIGNED_IN' }),
         });
+        const cb = await res.json();
+        if (cb?.user?.role) accountRole = cb.user.role;
       } catch {
-        // Non-fatal
+        // Non-fatal — fall back to the toggle
       }
 
       setMessage('✅ Verified! Redirecting...');
       setTimeout(() => {
-        router.push(role === 'pro' ? '/pro' : '/');
+        router.push(accountRole === 'pro' ? '/pro' : accountRole === 'admin' ? '/admin' : '/dashboard');
       }, 1000);
     } else {
       setError('Verification failed. Please try again.');
